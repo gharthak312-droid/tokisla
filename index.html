@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Tokisla</title>
+<meta name="theme-color" content="#0B0B10">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="assets/branding/icon-192.png">
+<link rel="stylesheet" href="styles.css">
+<script>try{var _th=localStorage.getItem("tokisla_theme");if(_th)document.documentElement.dataset.theme=_th;var _lg=localStorage.getItem("tokisla_lang");if(_lg==="ur"){document.documentElement.lang="ur";document.documentElement.dir="rtl";}}catch(e){}</script>
+</head>
+<body>
+
+<!-- Splash -->
+<div id="splash" class="splash">
+  <img src="assets/branding/logo-lockup.png" alt="Tokisla" class="splash-lockup">
+  <div class="splash-tag">Short videos, clean content</div>
+</div>
+
+<!-- Demo badge -->
+
+<!-- Auth -->
+<section id="authScreen" class="screen auth-screen hidden">
+  <div class="auth-card">
+    <button id="authCloseBtn" class="auth-close" aria-label="Close and keep watching"><span data-icon="close"></span></button>
+    <img src="assets/branding/icon-192.png" alt="" class="auth-logo">
+    <h1>Welcome to Tokisla</h1>
+    <p class="muted">Positive, educational and clean short videos.</p>
+    <div class="tabs">
+      <button id="tabLogin" class="tab active">Log in</button>
+      <button id="tabSignup" class="tab">Sign up</button>
+    </div>
+    <form id="authForm">
+      <div id="usernameField" class="field hidden">
+        <label>Username</label>
+        <input id="authUsername" type="text" autocomplete="username" placeholder="e.g. ahmad_reads" maxlength="24">
+        <small id="usernameHint" class="hint"></small>
+      </div>
+      <div class="field">
+        <label>Email</label>
+        <input id="authEmail" type="email" autocomplete="email" placeholder="you@example.com" required>
+      </div>
+      <div class="field">
+        <label>Password</label>
+        <input id="authPassword" type="password" autocomplete="current-password" placeholder="••••••••" required>
+      </div>
+      <div id="authError" class="form-error hidden"></div>
+      <button type="submit" id="authSubmit" class="btn btn-primary btn-block">Log in</button>
+    </form>
+    <button id="forgotBtn" class="link-btn">Forgot password?</button>
+    <button id="guestBtn" class="link-btn">Continue watching</button>
+    <p class="tiny muted center">By continuing you agree to the Community Guidelines and Terms.</p>
+  </div>
+</section>
+
+<!-- Onboarding: pick categories -->
+<section id="onboardingScreen" class="screen hidden">
+  <div class="page-head">
+    <h2>What do you enjoy?</h2>
+    <p class="muted">Pick a few categories — your feed starts with these. You can change them later.</p>
+  </div>
+  <div id="categoryGrid" class="chip-grid"></div>
+  <div class="sticky-actions">
+    <button id="onboardingDone" class="btn btn-primary btn-block">Start watching</button>
+  </div>
+</section>
+
+<!-- Main app shell -->
+<div id="appShell" class="app-shell hidden">
+  <!-- Top bar (over feed) -->
+  <header id="topBar" class="topbar">
+    <div class="feed-tabs">
+      <button id="feedFollowingBtn" class="feed-tab">Following</button>
+      <button id="feedForYouBtn" class="feed-tab active">For You</button>
+    </div>
+    <button id="topSearchBtn" class="icon-btn" aria-label="Search"><span data-icon="search"></span></button>
+  </header>
+
+  <main id="mainArea" class="main-area">
+    <!-- HOME / FEED -->
+    <section id="view-home" class="view">
+      <div id="feed" class="feed"></div>
+      <div id="feedEmpty" class="empty-state hidden">
+        <div class="empty-icon"><span data-icon="leaf"></span></div>
+        <h3>No videos yet</h3>
+        <p class="muted">Approved videos will appear here. Be the first to create something positive.</p>
+        <button class="btn btn-primary" data-goto="create">Create a video</button>
+      </div>
+    </section>
+
+    <!-- DISCOVER -->
+    <section id="view-discover" class="view hidden">
+      <div class="page-head"><h2>Discover</h2></div>
+      <div class="search-bar">
+        <input id="searchInput" type="search" placeholder="Search videos, creators, #hashtags" data-i18n-ph="search_ph">
+      </div>
+      <h3 class="section-title">Trending hashtags</h3>
+      <div id="trendingTags" class="chip-grid small"></div>
+      <h3 class="section-title">Categories</h3>
+      <div id="discoverCategories" class="chip-grid small"></div>
+      <h3 class="section-title">Creators</h3>
+      <div id="searchResults" class="list"></div>
+    </section>
+
+    <!-- MESSAGES -->
+    <section id="view-messages" class="view hidden">
+      <div id="convPanel">
+        <div class="page-head msg-head"><button class="icon-btn" id="msgBack" aria-label="Back"><span data-icon="back"></span></button><h2>Messages</h2></div>
+        <div id="convList" class="list"></div>
+        <div id="convEmpty" class="empty-state hidden"><div class="empty-icon"><span data-icon="comment"></span></div><p class="muted">No conversations yet. Open any profile and tap Message to start one.</p></div>
+        <h3 class="section-title">People you follow</h3>
+        <div id="msgPeople" class="list"></div>
+      </div>
+      <div id="threadPanel" class="hidden">
+        <div class="thread-head"><button class="icon-btn" id="threadBack" aria-label="Back"><span data-icon="back"></span></button><img id="threadAvatar" class="thread-avatar" alt=""><div class="grow"><div id="threadName" class="t"></div><div id="threadHandle" class="s muted"></div></div></div>
+        <div id="threadMsgs" class="thread-msgs"></div>
+        <form id="threadForm" class="thread-form"><input id="threadInput" maxlength="1000" placeholder="Write a message..." autocomplete="off"><button class="btn btn-primary thread-send" id="threadSend" type="submit" aria-label="Send"><span data-icon="send"></span></button></form>
+      </div>
+    </section>
+
+    <!-- CREATE -->
+    <section id="view-create" class="view hidden">
+      <div class="page-head"><h2>Create</h2><p class="muted">Short, positive, under 20 seconds.</p></div>
+      <div id="createBox" class="card">
+        <div id="createContext" class="ctx-banner hidden"><span id="createContextText"></span><button id="createContextClear" class="ctx-clear" aria-label="Clear"><span data-icon="close"></span></button></div>
+        <button id="storyBtn" class="btn btn-ghost btn-block" style="margin-bottom:10px"><span data-icon="plus"></span> Post a story (photo or short video)</button>
+        <input id="storyFile" type="file" accept="image/*,video/*" hidden>
+        <input id="videoFile" type="file" accept="video/*" hidden>
+        <input id="avatarFile" type="file" accept="image/*" hidden>
+        <button id="pickVideoBtn" class="btn btn-primary btn-block"><span data-icon="video"></span> Choose a video</button>
+        <video id="uploadPreview" class="upload-preview hidden" controls playsinline></video>
+        <div id="uploadMeta" class="tiny muted"></div>
+        <div class="field"><label>Caption</label>
+          <textarea id="uploadCaption" rows="2" maxlength="300" placeholder="Say something positive… use #hashtags"></textarea></div>
+        <div class="field"><label>Category</label><select id="uploadCategory"></select></div>
+        <div class="field"><label>Filter</label><div id="filterChips" class="filter-chips"></div></div>
+        <label class="check-row"><input type="checkbox" id="pollToggle"> Add a poll (question + two options)</label>
+        <div id="pollFields" class="hidden">
+          <div class="field"><label>Poll question</label><input id="pollQ" maxlength="80" placeholder="Ask something..."></div>
+          <div class="field"><label>Option 1</label><input id="pollA" maxlength="30"></div>
+          <div class="field"><label>Option 2</label><input id="pollB" maxlength="30"></div>
+        </div>
+        <div class="field"><label>Who can see it</label>
+          <select id="uploadVisibility">
+            <option value="public">Everyone (public)</option>
+            <option value="followers">Followers only</option>
+            <option value="private">Only me (private)</option>
+          </select></div>
+        <label class="check-row"><input type="checkbox" id="policyCheck"> I confirm this video follows the Community Guidelines (no music, no inappropriate content).</label>
+        <div class="progress hidden" id="uploadProgressWrap"><div class="progress-bar" id="uploadProgress"></div></div>
+        <div id="uploadMsg" class="tiny"></div>
+        <button id="publishBtn" class="btn btn-primary btn-block" disabled>Publish for review</button>
+        <button id="draftBtn" class="btn btn-ghost btn-block" style="margin-top:8px" disabled>Save as draft</button>
+        <p class="tiny muted center">Every video is reviewed before it appears in the public feed.</p>
+      </div>
+      <h3 class="section-title">My videos &amp; review status</h3>
+      <div id="myVideos" class="list"></div>
+    </section>
+
+    <!-- NOTIFICATIONS -->
+    <section id="view-notifications" class="view hidden">
+      <div class="page-head"><h2 data-i18n="notif_title">Notifications</h2></div>
+      <button class="msg-entry" id="msgEntry"><span class="msg-entry-ico"><span data-icon="comment"></span></span><span class="msg-entry-text"><span class="t">Messages</span><span class="s">See who messaged you</span></span><span id="msgBadge" class="msg-badge hidden">0</span></button>
+      <div id="notifList" class="list"></div>
+      <div id="notifEmpty" class="empty-state hidden"><div class="empty-icon"><span data-icon="bell"></span></div><p class="muted">Nothing here yet.</p></div>
+    </section>
+
+    <!-- PROFILE -->
+    <section id="view-friends" class="view hidden">
+      <div class="page-head"><h2 data-i18n="friends_title">Friends</h2></div>
+      <div id="friendsBox" style="padding:6px 14px"></div>
+    </section>
+    <section id="view-profile" class="view hidden">
+      <div id="profileBox"></div>
+    </section>
+  </main>
+
+  <!-- Bottom navigation -->
+  <nav class="bottom-nav">
+    <button class="nav-btn active" data-goto="home"><span class="nav-ico" data-icon="home"></span><span data-i18n="nav_home">Home</span></button>
+    <button class="nav-btn" data-goto="friends"><span class="nav-ico" data-icon="users"></span><span data-i18n="nav_friends">Friends</span></button>
+    <button class="nav-btn create-btn" data-goto="create" aria-label="Create"><span class="create-plus" data-icon="plus"></span></button>
+    <button class="nav-btn" data-goto="notifications"><span class="nav-ico" data-icon="bell"></span><span data-i18n="nav_alerts">Alerts</span><span id="notifDot" class="dot hidden"></span></button>
+    <button class="nav-btn" data-goto="profile"><span class="nav-ico" data-icon="user"></span><span data-i18n="nav_profile">Profile</span></button>
+  </nav>
+</div>
+
+<!-- Comments bottom sheet -->
+<div id="sheetBackdrop" class="sheet-backdrop hidden"></div>
+<div id="commentSheet" class="sheet hidden">
+  <div class="sheet-head"><h3>Comments</h3><button class="icon-btn" data-close-sheet aria-label="Close"><span data-icon="close"></span></button></div>
+  <div id="commentList" class="sheet-body"></div>
+  <form id="commentForm" class="sheet-form">
+    <input id="commentInput" type="text" maxlength="500" placeholder="Add a kind comment…">
+    <button class="btn btn-primary" type="submit">Post</button>
+  </form>
+</div>
+
+<!-- Generic sheet (profile actions / report / settings lists) -->
+<div id="actionSheet" class="sheet hidden">
+  <div class="sheet-head"><h3 id="actionSheetTitle">Options</h3><button class="icon-btn" data-close-sheet aria-label="Close"><span data-icon="close"></span></button></div>
+  <div id="actionSheetBody" class="sheet-body"></div>
+</div>
+
+<!-- Story viewer -->
+<div id="storyViewer" class="story-viewer hidden">
+  <div class="sv-bars" id="svBars"></div>
+  <div class="sv-head"><img id="svAvatar" class="thread-avatar" alt=""><div class="grow"><div id="svName" class="t"></div><div id="svTime" class="s"></div></div><button class="icon-btn" id="svClose" aria-label="Close"><span data-icon="close"></span></button></div>
+  <div class="sv-media" id="svMedia"></div>
+  <div class="sv-caption" id="svCaption"></div>
+  <button class="sv-zone left" id="svPrev" aria-label="Previous story"></button>
+  <button class="sv-zone right" id="svNext" aria-label="Next story"></button>
+</div>
+
+<!-- Toast -->
+<div id="toast" class="toast hidden"></div>
+
+<script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="store.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

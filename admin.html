@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tokisla Admin — Moderation</title>
+<meta name="theme-color" content="#0B0B10">
+<link rel="icon" href="assets/branding/icon-192.png">
+<style>
+  :root{--emerald:#7C3AED;--emerald-dark:#5B21B6;--gold:#EC4899;--ink:#12101A;--muted:#6E6A78;--line:#E6E3EE;--bg:#F8F7FA;--error:#D64545}
+  *{box-sizing:border-box} body{margin:0;font-family:Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+  button{font-family:inherit;cursor:pointer} input,select,textarea{font-family:inherit;font-size:14.5px;padding:11px 12px;border:1px solid var(--line);border-radius:10px;width:100%}
+  .hidden{display:none !important} .muted{color:var(--muted)} .small{font-size:12.5px}
+  header.top{background:var(--emerald);color:#fff;padding:12px 18px;display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:10}
+  header.top img{width:38px;height:38px;border-radius:10px}
+  header.top .title{font-weight:700;font-size:18px}
+  header.top .spacer{flex:1}
+  .badge{background:#7a5b12;color:#fff;font-size:11px;font-weight:700;padding:4px 10px;border-radius:999px}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:42px;padding:0 18px;border-radius:11px;font-size:14px;font-weight:600;border:1px solid transparent;background:#fff}
+  .btn-primary{background:var(--emerald);color:#fff}.btn-ghost{border-color:var(--line)}
+  .btn-danger{background:#fff;border-color:#f0caca;color:var(--error)}
+  .btn-warn{background:#fdf3d7;border-color:#e7cf8a;color:#7a5b12}
+  .wrap{max-width:1060px;margin:0 auto;padding:18px 14px 60px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:18px}
+  .login-card{max-width:420px;margin:8vh auto 0}
+  .tabs{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0}
+  .tab{padding:10px 16px;border-radius:999px;border:1.5px solid var(--line);background:#fff;font-weight:600;font-size:14px}
+  .tab.active{background:var(--emerald);border-color:var(--emerald);color:#fff}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+  .stat{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px}
+  .stat .n{font-size:26px;font-weight:800;color:var(--emerald-dark)}
+  .stat .l{font-size:12.5px;color:var(--muted);font-weight:600}
+  .queue-item{display:grid;grid-template-columns:300px 1fr;gap:16px;background:#fff;border:1px solid var(--line);border-radius:16px;padding:14px;margin-bottom:14px}
+  @media (max-width:720px){.queue-item{grid-template-columns:1fr}}
+  .queue-item video{width:100%;max-height:380px;border-radius:12px;background:#000}
+  .meta{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:13.5px;margin:8px 0}
+  .meta dt{color:var(--muted);font-weight:600}.meta dd{margin:0}
+  .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  .row-item{display:flex;gap:12px;align-items:center;background:#fff;border:1px solid var(--line);border-radius:13px;padding:11px 13px;margin-bottom:9px}
+  .row-item .grow{flex:1;min-width:0}
+  .status{font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px}
+  .status.pending{background:#fdf3d7;color:#7a5b12}.status.approved{background:#F0EAFB;color:var(--emerald-dark)}
+  .status.rejected{background:#fdecec;color:#8f1d1d}.status.open{background:#fdecec;color:#8f1d1d}
+  .status.reviewed,.status.dismissed{background:#F0EAFB;color:var(--emerald-dark)}
+  .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:#12241c;color:#fff;padding:11px 16px;border-radius:12px;font-size:13.5px;z-index:50;box-shadow:0 8px 24px rgba(0,0,0,.25)}
+  .err{background:#fdecec;color:#8f1d1d;border:1px solid #f5c6c6;padding:10px 12px;border-radius:10px;font-size:13px;margin:10px 0}
+  label{font-size:13px;font-weight:600;display:block;margin-bottom:6px}
+  .field{margin-bottom:13px}
+</style>
+</head>
+<body>
+<header class="top">
+  <img src="assets/branding/icon-192.png" alt="">
+  <div class="title">Tokisla Admin</div>
+  <span class="small" style="opacity:.85">Moderation &amp; Management</span>
+  <div class="spacer"></div>
+  <span id="modeBadge" class="badge hidden">DEMO MODE</span>
+  <span id="adminName" class="small"></span>
+  <button id="logoutBtn" class="btn btn-ghost hidden" style="height:36px">Log out</button>
+</header>
+
+<div class="wrap">
+  <!-- Login -->
+  <div id="loginCard" class="card login-card">
+    <h2 style="margin:4px 0 6px">Admin sign in</h2>
+    <p class="muted small" style="margin:0 0 14px">Only accounts with an admin or moderator role can enter. In live mode the role is set in the database — never in this page.</p>
+    <div id="demoCreds" class="hidden" style="background:#fdf3d7;border:1px solid #e7cf8a;border-radius:10px;padding:10px 12px;font-size:13px;margin-bottom:13px">
+      <b>Demo admin (demo mode only):</b><br>Email: <code>admin@tokisla.app</code><br>Password: <code>admin123</code>
+    </div>
+    <form id="loginForm">
+      <div class="field"><label>Email</label><input id="loginEmail" type="email" required autocomplete="username"></div>
+      <div class="field"><label>Password</label><input id="loginPassword" type="password" required autocomplete="current-password"></div>
+      <div id="loginError" class="err hidden"></div>
+      <button class="btn btn-primary" style="width:100%" type="submit">Sign in</button>
+    </form>
+  </div>
+
+  <!-- Panel -->
+  <div id="panel" class="hidden">
+    <div class="tabs">
+      <button class="tab active" data-tab="dashboard">Dashboard</button>
+      <button class="tab" data-tab="queue">Moderation Queue <span id="queueCount"></span></button>
+      <button class="tab" data-tab="stories">Stories <span id="storyCount"></span></button>
+      <button class="tab" data-tab="reports">Reports</button>
+      <button class="tab" data-tab="users">Users</button>
+      <button class="tab" data-tab="categories">Categories</button>
+      <button class="tab" data-tab="log">Decisions Log</button>
+    </div>
+
+    <section id="tab-dashboard">
+      <div class="stats" id="statCards"></div>
+      <div class="card" style="margin-top:14px">
+        <h3 style="margin:0 0 6px">How moderation works</h3>
+        <p class="muted" style="line-height:1.6;margin:0">Every uploaded video stays <b>Pending</b> and invisible to the public until you approve it here. Watch and listen to each video, then Approve, Reject (with a reason the creator will see), or mark Needs review. Reports from users appear in the Reports tab. Nothing is published automatically.</p>
+      </div>
+    </section>
+
+    <section id="tab-queue" class="hidden"><div id="queueList"></div></section>
+    <section id="tab-stories" class="hidden"><div id="storyList"></div></section>
+    <section id="tab-reports" class="hidden"><div id="reportList"></div></section>
+    <section id="tab-users" class="hidden"><div id="verifyBox"></div><div id="userList"></div></section>
+    <section id="tab-categories" class="hidden">
+      <div class="card" style="margin-bottom:12px">
+        <h3 style="margin:0 0 8px">Add a category</h3>
+        <div style="display:flex;gap:8px"><input id="newCatName" placeholder="e.g. Kids Nasheeds (vocals only)"><button class="btn btn-primary" id="addCatBtn">Add</button></div>
+      </div>
+      <div id="catList"></div>
+    </section>
+    <section id="tab-log" class="hidden"><div id="logList"></div></section>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="store.js"></script>
+<script>
+(function () {
+  "use strict";
+  const $ = (s, r) => (r || document).querySelector(s);
+  const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+  const CFG = window.TOKISLA_CONFIG, DEMO = window.TokislaStore.DEMO;
+  let sb = null;
+  if (!DEMO && window.supabase) sb = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY);
+  const store = window.TokislaStore.createStore(window.localStorage, sb);
+  let me = null;
+  const REASONS = ["Contains music", "Inappropriate content", "Spam or misleading", "Abuse or harassment", "Religious disrespect", "Low quality / unclear", "Other"];
+
+  function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.remove("hidden"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.add("hidden"), 2600); }
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+  function ago(iso) { const s = (Date.now() - new Date(iso).getTime()) / 1000; if (s < 3600) return Math.max(1, Math.floor(s / 60)) + "m ago"; if (s < 86400) return Math.floor(s / 3600) + "h ago"; return Math.floor(s / 86400) + "d ago"; }
+  function catName(id) { const c = window.TokislaStore.CATEGORIES.find((x) => x.id === id); return c ? c.name : ("#" + id); }
+
+  async function boot() {
+    if (DEMO) { $("#modeBadge").classList.remove("hidden"); $("#demoCreds").classList.remove("hidden"); await store.ensureDemoAdmin(); }
+    me = await store.currentUser().catch(() => null);
+    if (me && (me.role === "admin" || me.role === "moderator")) enterPanel();
+  }
+  $("#loginForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const err = $("#loginError"); err.classList.add("hidden");
+    try {
+      const p = await store.logIn($("#loginEmail").value.trim(), $("#loginPassword").value);
+      if (!p || !(p.role === "admin" || p.role === "moderator")) {
+        await store.logOut();
+        throw new Error("This account does not have an admin or moderator role.");
+      }
+      me = p; enterPanel();
+    } catch (ex) { err.textContent = ex.message || "Sign-in failed."; err.classList.remove("hidden"); }
+  });
+  $("#logoutBtn").addEventListener("click", async () => { await store.logOut(); location.reload(); });
+
+  function enterPanel() {
+    $("#loginCard").classList.add("hidden");
+    $("#panel").classList.remove("hidden");
+    $("#logoutBtn").classList.remove("hidden");
+    $("#adminName").textContent = "@" + me.username + " (" + me.role + ")";
+    refreshAll();
+  }
+  $$(".tab").forEach((t) => t.addEventListener("click", () => {
+    $$(".tab").forEach((x) => x.classList.toggle("active", x === t));
+    ["dashboard", "queue", "stories", "reports", "users", "categories", "log"].forEach((n) => $("#tab-" + n).classList.toggle("hidden", n !== t.dataset.tab));
+    refreshAll();
+  }));
+  async function refreshAll() { renderStats(); renderQueue(); renderStories(); renderReports(); renderUsers(); renderVerify(); renderCategories(); renderLog(); }
+
+  async function renderStories() {
+    const list = await store.adminStoryQueue().catch(() => []);
+    $("#storyCount").textContent = list.length ? "(" + list.length + ")" : "";
+    const box = $("#storyList");
+    box.innerHTML = list.length ? "" : '<div class="card"><p class="muted" style="margin:0">No stories are waiting for review.</p></div>';
+    list.forEach((st) => {
+      const el = document.createElement("div");
+      el.className = "queue-item";
+      const playable = st.media_type === "video" && st.storage_path && st.storage_path !== "story-media" && !String(st.storage_path).startsWith("blob:");
+      el.innerHTML = `
+        <div>${st.media_type === "image" ? `<img src="${esc(st.storage_path)}" style="width:100%;max-height:380px;object-fit:contain;border-radius:12px;background:#000" alt="">`
+          : playable ? `<video src="${esc(st.storage_path)}" controls playsinline preload="metadata"></video>`
+          : '<div class="card" style="text-align:center;padding:28px">Demo video story — playable in the app session where it was added.</div>'}</div>
+        <div>
+          <div style="font-weight:700;font-size:16px">${esc(st.caption || "Story")}</div>
+          <dl class="meta">
+            <dt>Creator</dt><dd>@${esc(st.username || st.user_id)}</dd>
+            <dt>Type</dt><dd>${esc(st.media_type)}${st.duration_seconds ? " · " + st.duration_seconds + "s" : ""}</dd>
+            <dt>Posted</dt><dd>${ago(st.created_at)}</dd>
+          </dl>
+          <p class="muted small">If approved, this story shows publicly for 24 hours from when it was posted.</p>
+          <div class="actions">
+            <button class="btn btn-primary" data-sdec="approved">Approve</button>
+            <button class="btn btn-danger" data-sdec="rejected">Reject</button>
+          </div>
+        </div>`;
+      el.querySelectorAll("[data-sdec]").forEach((b) => b.addEventListener("click", async () => {
+        try {
+          await store.adminDecideStory(me.id, st.id, b.dataset.sdec);
+          toast(b.dataset.sdec === "approved" ? "Story approved — live for 24 hours." : "Story rejected.");
+          refreshAll();
+        } catch (ex) { toast(ex.message); }
+      }));
+      box.appendChild(el);
+    });
+  }
+
+  async function renderStats() {
+    const s = await store.adminStats().catch(() => null); if (!s) return;
+    $("#queueCount").textContent = s.pending ? "(" + s.pending + ")" : "";
+    $("#statCards").innerHTML = [
+      ["Users", s.users], ["Approved videos", s.approved], ["Pending review", s.pending],
+      ["Rejected videos", s.rejected], ["Open reports", s.openReports],
+    ].map(([l, n]) => `<div class="stat"><div class="n">${n}</div><div class="l">${l}</div></div>`).join("");
+  }
+
+  async function renderQueue() {
+    const list = await store.adminQueue().catch(() => []);
+    const box = $("#queueList");
+    box.innerHTML = list.length ? "" : '<div class="card"><p class="muted" style="margin:0">The queue is empty — nothing is waiting for review.</p></div>';
+    list.forEach((v) => {
+      const el = document.createElement("div");
+      el.className = "queue-item";
+      const playable = v.storage_path && v.storage_path !== "demo-upload" && !String(v.storage_path).startsWith("blob:");
+      el.innerHTML = `
+        <div>${playable ? `<video src="${esc(v.storage_path)}" ${v.thumbnail_path ? `poster="${esc(v.thumbnail_path)}"` : ""} controls playsinline preload="metadata"></video>`
+          : '<div class="card" style="text-align:center;padding:28px">Demo upload — playable in the app session where it was added.</div>'}</div>
+        <div>
+          <div style="font-weight:700;font-size:16px">${esc(v.caption || "Untitled")}</div>
+          <dl class="meta">
+            <dt>Creator</dt><dd>@${esc(v.username || v.creator_id)}</dd>
+            <dt>Category</dt><dd>${esc((v.category_ids || []).map(catName).join(", ") || "—")}</dd>
+            <dt>Duration</dt><dd>${v.duration_seconds}s (limit ${CFG.MAX_VIDEO_SECONDS}s)</dd>
+            <dt>Size</dt><dd>${v.size_bytes ? (v.size_bytes / 1048576).toFixed(1) + " MB" : "—"}</dd>
+            <dt>Visibility</dt><dd>${esc(v.visibility)}</dd>
+            <dt>Extras</dt><dd>${esc([v.filter && v.filter !== "normal" ? "Filter: " + v.filter : "", v.poll ? "Poll: " + v.poll.question : "", v.duet_of ? "Duet" : "", v.reply_comment_id ? "Video reply to a comment" : ""].filter(Boolean).join(" · ") || "—")}</dd>
+            <dt>Uploaded</dt><dd>${ago(v.created_at)}</dd>
+            <dt>Reports</dt><dd>${v.reports || 0} open</dd>
+          </dl>
+          <div class="field" style="max-width:420px"><label>Rejection reason (creator sees this)</label>
+            <select class="rej-reason">${REASONS.map((r) => `<option>${r}</option>`).join("")}</select></div>
+          <div class="actions">
+            <button class="btn btn-primary" data-dec="approved">Approve</button>
+            <button class="btn btn-warn" data-dec="needs_review">Needs review</button>
+            <button class="btn btn-danger" data-dec="rejected">Reject</button>
+          </div>
+        </div>`;
+      el.querySelectorAll("[data-dec]").forEach((b) => b.addEventListener("click", async () => {
+        const dec = b.dataset.dec;
+        const reason = dec === "rejected" ? el.querySelector(".rej-reason").value : "";
+        try {
+          await store.adminDecide(me.id, v.id, dec, reason);
+          toast(dec === "approved" ? "Approved — now live in the feed." : dec === "rejected" ? "Rejected with reason." : "Marked as needs review.");
+          refreshAll();
+        } catch (ex) { toast(ex.message); }
+      }));
+      box.appendChild(el);
+    });
+  }
+
+  async function renderReports() {
+    const list = await store.adminReports().catch(() => []);
+    const box = $("#reportList");
+    box.innerHTML = list.length ? "" : '<div class="card"><p class="muted" style="margin:0">No open reports.</p></div>';
+    list.forEach((r) => {
+      const el = document.createElement("div");
+      el.className = "row-item";
+      el.innerHTML = `<div class="grow"><div style="font-weight:600">${esc(r.target_type)} — ${esc(r.reason)}</div>
+        <div class="small muted">Target: ${esc(String(r.target_id).slice(0, 18))} · ${ago(r.created_at)}</div></div>
+        <span class="status open">open</span>
+        <button class="btn btn-ghost" data-act="reviewed" style="height:37px">Mark reviewed</button>
+        <button class="btn btn-ghost" data-act="dismissed" style="height:37px">Dismiss</button>`;
+      el.querySelectorAll("[data-act]").forEach((b) => b.addEventListener("click", async () => {
+        await store.adminSetReportStatus(r.id, b.dataset.act); toast("Report " + b.dataset.act + "."); refreshAll();
+      }));
+      box.appendChild(el);
+    });
+  }
+
+  async function renderVerify() {
+    const box = $("#verifyBox"); if (!box) return;
+    const list = await store.adminVerifyRequests().catch(() => []);
+    if (!list.length) { box.innerHTML = ""; return; }
+    box.innerHTML = `<div class="card" style="margin-bottom:12px"><h3 style="margin-bottom:8px">Blue tick applications (${list.length})</h3>` +
+      list.map((r) => `<div class="row-item"><div class="grow"><div style="font-weight:600">${esc(r.full_name || "")} <span class="muted">@${esc(r.username || "")}</span></div>
+        <div class="small muted">${esc(r.category || "Creator")} · ${esc(r.method || "")} · TID ${esc(r.tid || "")} · Rs 300/month · ${ago(r.created_at || Date.now())}</div>
+        ${r.note ? `<div class="small">${esc(r.note)}</div>` : ""}</div>
+        <button class="btn btn-primary" data-verify-ok="${r.id}" style="height:37px">Approve</button>
+        <button class="btn btn-ghost" data-verify-no="${r.id}" style="height:37px">Reject</button></div>`).join("") + "</div>";
+    $$("[data-verify-ok]").forEach((b) => b.addEventListener("click", async () => { await store.adminDecideVerification(me.id, b.dataset.verifyOk, "approved"); toast("Blue tick approved — the tick is now active."); refreshAll(); }));
+    $$("[data-verify-no]").forEach((b) => b.addEventListener("click", async () => { await store.adminDecideVerification(me.id, b.dataset.verifyNo, "rejected"); toast("Application rejected."); refreshAll(); }));
+  }
+
+  async function renderUsers() {
+    const list = await store.adminUsers().catch(() => []);
+    const box = $("#userList");
+    box.innerHTML = "";
+    list.forEach((u) => {
+      const el = document.createElement("div");
+      el.className = "row-item";
+      el.innerHTML = `<div class="grow"><div style="font-weight:600">@${esc(u.username)} ${u.role !== "user" ? `<span class="status approved">${esc(u.role)}</span>` : ""} ${u.is_suspended ? '<span class="status rejected">suspended</span>' : ""}</div>
+        <div class="small muted">${esc(u.display_name || "")} · joined ${ago(u.created_at || Date.now())}</div></div>
+        ${u.id !== me.id && u.role !== "admin" ? `<button class="btn ${u.is_suspended ? "btn-ghost" : "btn-danger"}" style="height:37px">${u.is_suspended ? "Restore" : "Suspend"}</button>` : ""}`;
+      const b = el.querySelector("button");
+      if (b) b.addEventListener("click", async () => { await store.adminSetSuspended(u.id, !u.is_suspended); toast(u.is_suspended ? "User restored." : "User suspended — their videos are hidden."); refreshAll(); });
+      box.appendChild(el);
+    });
+  }
+
+  async function renderCategories() {
+    const list = await store.adminCategories().catch(() => []);
+    const box = $("#catList");
+    box.innerHTML = "";
+    list.forEach((c) => {
+      const el = document.createElement("div");
+      el.className = "row-item";
+      el.innerHTML = `<div class="grow"><div style="font-weight:600">${esc(c.name)}</div><div class="small muted">${esc(c.slug)}</div></div>
+        <span class="status ${c.is_active ? "approved" : "rejected"}">${c.is_active ? "active" : "off"}</span>
+        <button class="btn btn-ghost" style="height:37px">${c.is_active ? "Turn off" : "Turn on"}</button>`;
+      el.querySelector("button").addEventListener("click", async () => { await store.adminToggleCategory(c.id); renderCategories(); });
+      box.appendChild(el);
+    });
+  }
+  $("#addCatBtn").addEventListener("click", async () => {
+    const name = $("#newCatName").value.trim(); if (!name) return;
+    await store.adminAddCategory(name); $("#newCatName").value = ""; toast("Category added."); renderCategories();
+  });
+
+  async function renderLog() {
+    const list = await store.adminReviews().catch(() => []);
+    const box = $("#logList");
+    box.innerHTML = list.length ? "" : '<div class="card"><p class="muted" style="margin:0">No decisions recorded yet.</p></div>';
+    list.forEach((r) => {
+      const el = document.createElement("div");
+      el.className = "row-item";
+      el.innerHTML = `<div class="grow"><div style="font-weight:600">Video ${esc(String(r.video_id).slice(0, 13))}…</div>
+        <div class="small muted">by @${esc(r.reviewer_name || "admin")} · ${ago(r.created_at)}${r.reason ? " · Reason: " + esc(r.reason) : ""}</div></div>
+        <span class="status ${r.decision === "approved" ? "approved" : r.decision === "rejected" ? "rejected" : "pending"}">${esc(r.decision)}</span>`;
+      box.appendChild(el);
+    });
+  }
+
+  boot();
+})();
+</script>
+</body>
+</html>
