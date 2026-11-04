@@ -8,6 +8,7 @@
   const DEMO = window.TokislaStore.DEMO;
 
   let backend = null;
+  let localDrafts = []; // Session-only drafts saved when the server is unreachable (see saveLocalDraft): the video File lives only in page memory — the app never persists picked video bytes — so a reload drops them, exactly like any unposted pick today. Server drafts persist; these do not.
   if (!DEMO && window.Appwrite) {
     const client = new window.Appwrite.Client().setEndpoint(CFG.APPWRITE_ENDPOINT).setProject(CFG.APPWRITE_PROJECT_ID);
     backend = {
@@ -44,6 +45,7 @@
       prof_edit: "Edit profile", prof_follow: "Follow", prof_following: "Following", stat_followers: "Followers", stat_following: "Following", stat_likes: "Likes",
       tab_videos: "My videos", tab_saved: "Saved", tab_liked: "Liked", tab_locked: "Locked",
       set_title: "Settings and privacy", set_studio: "Tokisla Studio · Analytics", set_activity: "Activity center", set_account: "Account",
+      set_changepw: "Change password",
       set_share: "Share profile", set_private: "Private account", set_blocked: "Blocked accounts", set_guidelines: "Community Guidelines",
       set_terms: "Terms of Service", set_privacy: "Privacy Policy", set_delete: "Delete my account", set_logout: "Log out",
       set_display: "Display", set_language: "Language", disp_dark: "Dark", disp_light: "Light",
@@ -55,6 +57,7 @@
       prof_edit: "پروفائل میں ترمیم", prof_follow: "فالو کریں", prof_following: "فالو کیا ہوا", stat_followers: "فالوورز", stat_following: "فالو کیے گئے", stat_likes: "پسند",
       tab_videos: "میری ویڈیوز", tab_saved: "محفوظ", tab_liked: "پسندیدہ", tab_locked: "نجی",
       set_title: "ترتیبات اور رازداری", set_studio: "ٹوکسلا اسٹوڈیو · اعداد و شمار", set_activity: "سرگرمی مرکز", set_account: "اکاؤنٹ",
+      set_changepw: "پاس ورڈ تبدیل کریں",
       set_share: "پروفائل شیئر کریں", set_private: "نجی اکاؤنٹ", set_blocked: "مسدود اکاؤنٹس", set_guidelines: "کمیونٹی رہنما اصول",
       set_terms: "سروس کی شرائط", set_privacy: "رازداری کی پالیسی", set_delete: "میرا اکاؤنٹ حذف کریں", set_logout: "لاگ آؤٹ",
       set_display: "ڈسپلے", set_language: "زبان", disp_dark: "گہرا (ڈارک)", disp_light: "روشن (لائٹ)",
@@ -150,7 +153,7 @@
     more: '<circle cx="5" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.7" fill="currentColor" stroke="none"/>',
     close: '<path d="m6 6 12 12M18 6 6 18"/>',
     play: '<path d="M8 5.4v13.2L18.5 12Z" fill="currentColor" stroke="none"/>',
-    settings: '<circle cx="12" cy="12" r="3.2"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/>',
+    settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
     userPlus: '<circle cx="10" cy="8" r="3.5"/><path d="M3.5 19.5c1.1-2.9 3.5-4.4 6.5-4.4 1.2 0 2.3.2 3.3.7"/><path d="M18.5 8v6M15.5 11h6"/>',
     link: '<path d="M10 14a5 5 0 0 0 7.1 0l2-2a5 5 0 0 0-7.1-7.1l-1.2 1.1"/><path d="M14 10a5 5 0 0 0-7.1 0l-2 2A5 5 0 0 0 12 19.1l1.2-1.1"/>',
     flag: '<path d="M5 22V4"/><path d="M5 5h12.3l-2.4 3.8 2.4 3.7H5" fill="currentColor" stroke="none"/>',
@@ -1482,9 +1485,65 @@
   $("#postBackBtn").addEventListener("click", () => { const ppv = $("#postPreviewVideo"); if (ppv) { try { ppv.pause(); } catch (e) {} } showCreateScreen("edit"); });
 
   /* ---- drafts ---- */
+  /* A draft saved while the server is unreachable lives only in this
+     page session: the video File itself is kept in memory (the app
+     never persists picked video bytes anywhere — a reload drops an
+     unposted pick today too), so the row reappears in the Drafts
+     sheet for as long as the page lives. Tapping its Post restores
+     the video into the editor and consumes the row, where the
+     Community Guidelines checkbox still gates publishing exactly as
+     on a fresh post. Server drafts are untouched by all of this. */
+  function saveLocalDraft() {
+    if (!uploadFile || !uploadDuration) return null;
+    const dur = effectiveDuration();
+    if (!(dur > 0) || dur > CFG.MAX_VIDEO_SECONDS + 0.5) return null;
+    const state = {
+      file: uploadFile, blobUrl: uploadBlobUrl, duration: uploadDuration,
+      thumb: uploadThumb, filter: uploadFilter, visibility: uploadVisibility,
+      location: uploadLocation, link: uploadLink, disclosure: uploadDisclosure,
+      poll: uploadPoll, sound: uploadSound,
+      trimStart: uploadTrimStart, trimEnd: uploadTrimEnd || uploadDuration,
+      duet: duetTarget, reply: replyTarget,
+      caption: $("#postCaption").value,
+    };
+    const row = {
+      id: "local-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      creator_id: me ? me.id : null,
+      caption: state.caption, duration_seconds: Math.round(dur * 100) / 100,
+      size_bytes: uploadFile.size, moderation_status: "draft",
+      created_at: new Date().toISOString(),
+      _local: true, _state: state,
+    };
+    localDrafts.unshift(row);
+    return row;
+  }
+  function restoreLocalDraft(v) {
+    const s = v._state; if (!s) return false;
+    const i = localDrafts.indexOf(v); if (i >= 0) localDrafts.splice(i, 1);
+    uploadFile = s.file; uploadBlobUrl = s.blobUrl; uploadDuration = s.duration;
+    uploadThumb = s.thumb || ""; uploadFilter = s.filter;
+    uploadVisibility = s.visibility; uploadLocation = s.location || "";
+    uploadLink = s.link || ""; uploadDisclosure = !!s.disclosure;
+    uploadPoll = s.poll || null; uploadSound = s.sound || null;
+    uploadTrimStart = s.trimStart || 0; uploadTrimEnd = s.trimEnd || s.duration;
+    duetTarget = s.duet || null; replyTarget = s.reply || null;
+    const cap = $("#postCaption"); if (cap) cap.value = s.caption || "";
+    const pc = $("#postPolicyCheck"); if (pc) pc.checked = false;
+    updateCreateContext(); updateSoundLabel();
+    showCreateScreen("post");
+    return true;
+  }
   async function openDraftsSheet(saveCurrentFirst) {
-    if (saveCurrentFirst && uploadFile) { await doSubmit(true, { silent: true }); }
-    const list = await store.myDrafts(me.id).catch(() => []);
+    if (saveCurrentFirst && uploadFile) {
+      const saved = await doSubmit(true, { silent: true });
+      if (!saved) {
+        /* The server draft did not save (usually no connection):
+           keep the video as a session-local draft instead of losing
+           the pick, and say so plainly. */
+        if (saveLocalDraft()) toast("Saved as a draft on this device — post it from Drafts when you're back online.");
+      }
+    }
+    const list = [...localDrafts, ...(await store.myDrafts(me.id).catch(() => []))];
     openActionSheet("Drafts", list.length ? "" : '<p class="muted" style="padding:8px 2px">No drafts yet. Save this video as a draft from the post screen to finish it later.</p>');
     const body = $("#actionSheetBody");
     list.forEach((v) => {
@@ -1494,10 +1553,19 @@
         <button class="btn btn-primary draft-post" style="height:38px;padding:0 14px" type="button">Post</button>
         <button class="btn btn-ghost draft-del" style="height:38px;padding:0 12px" type="button">Delete</button>`;
       row.querySelector(".draft-post").addEventListener("click", async () => {
+        if (v._local) {
+          hideSheets();
+          if (restoreLocalDraft(v)) toast("Draft restored — confirm the guidelines and tap Post.");
+          return;
+        }
         try { await store.publishDraft(me.id, v.id); hideSheets(); toast("Live now — your video is in the feed."); renderMyVideos(); loadFeed(); }
         catch (e) { toast(e.message); }
       });
       row.querySelector(".draft-del").addEventListener("click", async () => {
+        if (v._local) {
+          const i = localDrafts.indexOf(v); if (i >= 0) localDrafts.splice(i, 1);
+          hideSheets(); openDraftsSheet(false); return;
+        }
         try { await store.deleteDraft(me.id, v.id); hideSheets(); openDraftsSheet(false); renderMyVideos(); }
         catch (e) { toast(e.message); }
       });
@@ -1526,6 +1594,16 @@
   function effectiveDuration() {
     const end = uploadTrimEnd || uploadDuration || 0;
     return Math.max(0, end - uploadTrimStart);
+  }
+  /* A failed fetch is a network-level failure (no connection, DNS, or
+     the server unreachable): the raw TypeError text ("Failed to
+     fetch") says nothing useful, so the post screen shows a plain
+     connection message instead and the detail stays in the console.
+     Server and validation errors keep their own message. */
+  function isNetworkError(ex) {
+    if (!ex) return false;
+    const m = String(ex.message || "");
+    return /failed to fetch/i.test(m) || (ex.name === "TypeError" && /networkerror|load failed|network request failed/i.test(m));
   }
   async function doSubmit(isDraft, opts) {
     if (needLogin()) return null;
@@ -1591,8 +1669,10 @@
       renderMyVideos();
       return created;
     } catch (ex) {
-      if (msgEl) { msgEl.textContent = ex.message; msgEl.style.color = "var(--error)"; }
-      else toast(ex.message);
+      if (typeof console !== "undefined" && console.error) console.error("Tokisla submit failed:", ex);
+      const msg = isNetworkError(ex) ? "Couldn't reach Tokisla. Check your connection and try again." : ex.message;
+      if (msgEl) { msgEl.textContent = msg; msgEl.style.color = "var(--error)"; }
+      else toast(msg);
       return null;
     }
   }
@@ -2179,9 +2259,45 @@
       <div class="ac-row"><span class="menu-ico">${icon("calendar")}</span><div class="grow"><div class="muted" style="font-size:12px">Account created</div><div style="font-size:14.5px">${a.created_at ? fmtWhen(a.created_at) : "—"}</div></div></div>
       <div class="ac-row"><span class="menu-ico">${icon("shield")}</span><div class="grow"><div class="muted" style="font-size:12px">Account status</div><div style="font-size:14.5px">${a.is_suspended ? "Suspended" : "Active"}</div></div></div>
       <div class="ac-row"><span class="menu-ico">${icon("lock")}</span><div class="grow"><div class="muted" style="font-size:12px">Private account</div><div style="font-size:14.5px">${a.private_account ? "On" : "Off"}</div></div></div>
+      <button class="menu-row" id="acctChangePw"><span class="menu-ico">${icon("lock")}</span><span style="flex:1;text-align:start">${t("set_changepw")}</span></button>
       <p class="muted" style="padding:10px 4px;font-size:12.5px">Your email is private — it is never shown on your profile or to other users.</p>
       <button class="btn btn-ghost btn-block" id="acctEdit">Edit profile</button>`);
+    $("#acctChangePw").addEventListener("click", changePasswordSheet);
     $("#acctEdit").addEventListener("click", () => editProfileSheet(a));
+  }
+
+  /* A 401 with an authorization/scope failure means the session itself is
+   * gone (unlike a wrong current password, which is a credentials failure
+   * on a live session) — those route back to sign-in via showAuth(). */
+  function isSessionGone(e) {
+    if (!e || e.code !== 401) return false;
+    const str = String(e.type || "") + " " + String(e.message || "");
+    return /unauthorized_scope|not authorized|missing.*authori[sz]ation/i.test(str);
+  }
+
+  function changePasswordSheet() {
+    if (!me) { needLogin(); return; }
+    openActionSheet(t("set_changepw"), `
+      <div class="field"><label>Current password</label><input id="cpCurrent" type="password" autocomplete="current-password"></div>
+      <div class="field"><label>New password</label><input id="cpNew" type="password" autocomplete="new-password"></div>
+      <div class="field"><label>Confirm new password</label><input id="cpConfirm" type="password" autocomplete="new-password"></div>
+      <div id="cpError" class="form-error hidden"></div>
+      <button class="btn btn-primary btn-block" id="cpSave">${t("set_changepw")}</button>`);
+    const showErr = (msg) => { const el = $("#cpError"); el.textContent = msg; el.classList.remove("hidden"); };
+    $("#cpSave").addEventListener("click", async () => {
+      const cur = $("#cpCurrent").value, nw = $("#cpNew").value, cf = $("#cpConfirm").value;
+      $("#cpError").classList.add("hidden");
+      if (!cur) return showErr("Enter your current password.");
+      if (nw.length < 8) return showErr("New password must be at least 8 characters.");
+      if (nw !== cf) return showErr("New passwords do not match.");
+      try {
+        await store.changePassword(nw, cur);
+        hideSheets(); toast("Password changed.");
+      } catch (e) {
+        if (isSessionGone(e)) { hideSheets(); toast("Your session expired — please log in again."); showAuth(); return; }
+        showErr(e.message || "Could not change your password.");
+      }
+    });
   }
 
   function profileShareSheet() {

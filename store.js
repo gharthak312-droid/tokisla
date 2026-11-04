@@ -120,7 +120,7 @@
   const now = () => new Date().toISOString();
 
   /* ------------------------------------------------------------ DEMO store */
-  const LS_KEY = "tokisla_demo_v5";
+  const LS_KEY = "tokisla_demo_v6";
 
   function demoSeed() {
     const creators = [
@@ -140,45 +140,110 @@
     vids.push(
       { id: "v-user-1", creator_id: "u-owner", caption: "Assalam-o-Alaikum - Chairman Wadood on Tokisla #welcome",
         storage_provider: "demo", storage_path: "assets/user/user-1.mp4", thumbnail_path: "assets/user/user-1.jpg",
-        duration_seconds: 16, size_bytes: 594198, visibility: "public", moderation_status: "approved",
+        duration_seconds: 12, size_bytes: 251045, visibility: "public", moderation_status: "approved",
         rejection_reason: null, published_at: now(), created_at: now(), like_count: 0, comment_count: 0, category_ids: [16] },
       { id: "v-user-2", creator_id: "u-owner", caption: "Walk with confidence #style",
         storage_provider: "demo", storage_path: "assets/user/user-2.mp4", thumbnail_path: "assets/user/user-2.jpg",
-        duration_seconds: 20, size_bytes: 1130937, visibility: "public", moderation_status: "approved",
+        duration_seconds: 16, size_bytes: 3553125, visibility: "public", moderation_status: "approved",
         rejection_reason: null, published_at: now(), created_at: now(), like_count: 0, comment_count: 0, category_ids: [16],
         poll: { question: "Confidence pehle, ya style?", options: ["Confidence", "Style"] } },
       { id: "v-user-3", creator_id: "u-owner", caption: "Claim #1 - top rank moment #gaming",
         storage_provider: "demo", storage_path: "assets/user/user-3.mp4", thumbnail_path: "assets/user/user-3.jpg",
-        duration_seconds: 10, size_bytes: 1485892, visibility: "public", moderation_status: "approved",
+        duration_seconds: 10, size_bytes: 2137709, visibility: "public", moderation_status: "approved",
         rejection_reason: null, published_at: now(), created_at: now(), like_count: 0, comment_count: 0, category_ids: [16] },
       { id: "v-user-4", creator_id: "u-owner", caption: "Before marriage - a sweet couple moment #family",
         storage_provider: "demo", storage_path: "assets/user/user-4.mp4", thumbnail_path: "assets/user/user-4.jpg",
-        duration_seconds: 17, size_bytes: 984391, visibility: "public", moderation_status: "approved",
+        duration_seconds: 17, size_bytes: 1709499, visibility: "public", moderation_status: "approved",
         rejection_reason: null, published_at: now(), created_at: now(), like_count: 0, comment_count: 0, category_ids: [15] },
       { id: "v-user-5", creator_id: "u-owner", caption: "Alag hi level ki mummy - clean comedy #funny",
         storage_provider: "demo", storage_path: "assets/user/user-5.mp4", thumbnail_path: "assets/user/user-5.jpg",
-        duration_seconds: 15, size_bytes: 545714, visibility: "public", moderation_status: "approved",
+        duration_seconds: 15, size_bytes: 2324934, visibility: "public", moderation_status: "approved",
         rejection_reason: null, published_at: now(), created_at: now(), like_count: 0, comment_count: 0, category_ids: [8] },
       { id: "v-user-6", creator_id: "u-owner", caption: "Urdu poetry - wafadari ki baat #poetry",
         storage_provider: "demo", storage_path: "assets/user/user-6.mp4", thumbnail_path: "assets/user/user-6.jpg",
-        duration_seconds: 13, size_bytes: 518071, visibility: "public", moderation_status: "approved",
+        duration_seconds: 13, size_bytes: 422076, visibility: "public", moderation_status: "approved",
         rejection_reason: null, published_at: now(), created_at: now(), like_count: 0, comment_count: 0, category_ids: [11] },
       { id: "v-user-7", creator_id: "u-owner", caption: "Hamesha khush rehna chahte ho - a gentle reminder #motivation",
         storage_provider: "demo", storage_path: "assets/user/user-7.mp4", thumbnail_path: "assets/user/user-7.jpg",
-        duration_seconds: 10, size_bytes: 288499, visibility: "public", moderation_status: "approved",
+        duration_seconds: 20, size_bytes: 3874068, visibility: "public", moderation_status: "approved",
         rejection_reason: null, published_at: now(), created_at: now(), like_count: 0, comment_count: 0, category_ids: [12] },
       { id: "v-user-8", creator_id: "u-owner", caption: "Smile more, worry less #positive",
         storage_provider: "demo", storage_path: "assets/user/user-8.mp4", thumbnail_path: "assets/user/user-8.jpg",
-        duration_seconds: 18, size_bytes: 2154398, visibility: "public", moderation_status: "approved",
+        duration_seconds: 10, size_bytes: 362319, visibility: "public", moderation_status: "approved",
         rejection_reason: null, published_at: now(), created_at: now(), like_count: 0, comment_count: 0, category_ids: [20] },
       { id: "v-user-9", creator_id: "u-owner", caption: "Evening vibes - Quetta walk #style",
         storage_provider: "demo", storage_path: "assets/user/user-9.mp4", thumbnail_path: "assets/user/user-9.jpg",
-        duration_seconds: 17, size_bytes: 1611962, visibility: "public", moderation_status: "approved",
+        duration_seconds: 18, size_bytes: 3153041, visibility: "public", moderation_status: "approved",
         rejection_reason: null, published_at: now(), created_at: now(), like_count: 0, comment_count: 0, category_ids: [16] },
       { id: "v-user-10", creator_id: "u-owner", caption: "Chota Don - Urdu poetry lines #poetry",
         storage_provider: "demo", storage_path: "assets/user/user-10.mp4", thumbnail_path: "assets/user/user-10.jpg",
         duration_seconds: 12, size_bytes: 361094, visibility: "public", moderation_status: "approved",
-        rejection_reason: null, published_at: now(), created_at: now(), like_count: 0, comment_count: 0, category_ids: [11] }
+        rejection_reason: null, published_at: now(), created_at: now(), like_count: 0, comment_count: 0, category_ids: [11] },
+      // Check videos added 2026-11-05 at the owner's request ("ye sab videos
+      // dalo"). Slots 11-25. Captions intentionally empty (never invented),
+      // counts 0, no categories assigned. Slots 11, 12, 14, 15, 16, 17, 25
+      // trimmed to 20s per his standing trim order; all other files copied
+      // byte-identical; landscape/square natives kept as-is (landscape rule).
+      { id: "v-user-11", creator_id: "u-owner", caption: "",
+        storage_provider: "demo", storage_path: "assets/user/user-11.mp4", thumbnail_path: "assets/user/user-11.jpg",
+        duration_seconds: 20, size_bytes: 2464904, visibility: "public", moderation_status: "approved",
+        rejection_reason: null, published_at: now(), created_at: now(), like_count: 0, comment_count: 0, category_ids: [] },
+      { id: "v-user-12", creator_id: "u-owner", caption: "",
+        storage_provider: "demo", storage_path: "assets/user/user-12.mp4", thumbnail_path: "assets/user/user-12.jpg",
+        duration_seconds: 20, size_bytes: 1916568, visibility: "public", moderation_status: "approved",
+        rejection_reason: null, published_at: now(), created_at: now(), like_count: 0, comment_count: 0, category_ids: [] },
+      { id: "v-user-13", creator_id: "u-owner", caption: "",
+        storage_provider: "demo", storage_path: "assets/user/user-13.mp4", thumbnail_path: "assets/user/user-13.jpg",
+        duration_seconds: 18, size_bytes: 2778777, visibility: "public", moderation_status: "approved",
+        rejection_reason: null, published_at: now(), created_at: now(), like_count: 0, comment_count: 0, category_ids: [] },
+      { id: "v-user-14", creator_id: "u-owner", caption: "",
+        storage_provider: "demo", storage_path: "assets/user/user-14.mp4", thumbnail_path: "assets/user/user-14.jpg",
+        duration_seconds: 20, size_bytes: 1418622, visibility: "public", moderation_status: "approved",
+        rejection_reason: null, published_at: now(), created_at: now(), like_count: 0, comment_count: 0, category_ids: [] },
+      { id: "v-user-15", creator_id: "u-owner", caption: "",
+        storage_provider: "demo", storage_path: "assets/user/user-15.mp4", thumbnail_path: "assets/user/user-15.jpg",
+        duration_seconds: 20, size_bytes: 2167213, visibility: "public", moderation_status: "approved",
+        rejection_reason: null, published_at: now(), created_at: now(), like_count: 0, comment_count: 0, category_ids: [] },
+      { id: "v-user-16", creator_id: "u-owner", caption: "",
+        storage_provider: "demo", storage_path: "assets/user/user-16.mp4", thumbnail_path: "assets/user/user-16.jpg",
+        duration_seconds: 20, size_bytes: 4632752, visibility: "public", moderation_status: "approved",
+        rejection_reason: null, published_at: now(), created_at: now(), like_count: 0, comment_count: 0, category_ids: [] },
+      { id: "v-user-17", creator_id: "u-owner", caption: "",
+        storage_provider: "demo", storage_path: "assets/user/user-17.mp4", thumbnail_path: "assets/user/user-17.jpg",
+        duration_seconds: 20, size_bytes: 2741817, visibility: "public", moderation_status: "approved",
+        rejection_reason: null, published_at: now(), created_at: now(), like_count: 0, comment_count: 0, category_ids: [] },
+      { id: "v-user-18", creator_id: "u-owner", caption: "",
+        storage_provider: "demo", storage_path: "assets/user/user-18.mp4", thumbnail_path: "assets/user/user-18.jpg",
+        duration_seconds: 16, size_bytes: 3489033, visibility: "public", moderation_status: "approved",
+        rejection_reason: null, published_at: now(), created_at: now(), like_count: 0, comment_count: 0, category_ids: [] },
+      { id: "v-user-19", creator_id: "u-owner", caption: "",
+        storage_provider: "demo", storage_path: "assets/user/user-19.mp4", thumbnail_path: "assets/user/user-19.jpg",
+        duration_seconds: 9, size_bytes: 1975608, visibility: "public", moderation_status: "approved",
+        rejection_reason: null, published_at: now(), created_at: now(), like_count: 0, comment_count: 0, category_ids: [] },
+      { id: "v-user-20", creator_id: "u-owner", caption: "",
+        storage_provider: "demo", storage_path: "assets/user/user-20.mp4", thumbnail_path: "assets/user/user-20.jpg",
+        duration_seconds: 8, size_bytes: 1864889, visibility: "public", moderation_status: "approved",
+        rejection_reason: null, published_at: now(), created_at: now(), like_count: 0, comment_count: 0, category_ids: [] },
+      { id: "v-user-21", creator_id: "u-owner", caption: "",
+        storage_provider: "demo", storage_path: "assets/user/user-21.mp4", thumbnail_path: "assets/user/user-21.jpg",
+        duration_seconds: 17, size_bytes: 3847582, visibility: "public", moderation_status: "approved",
+        rejection_reason: null, published_at: now(), created_at: now(), like_count: 0, comment_count: 0, category_ids: [] },
+      { id: "v-user-22", creator_id: "u-owner", caption: "",
+        storage_provider: "demo", storage_path: "assets/user/user-22.mp4", thumbnail_path: "assets/user/user-22.jpg",
+        duration_seconds: 15, size_bytes: 3358628, visibility: "public", moderation_status: "approved",
+        rejection_reason: null, published_at: now(), created_at: now(), like_count: 0, comment_count: 0, category_ids: [] },
+      { id: "v-user-23", creator_id: "u-owner", caption: "",
+        storage_provider: "demo", storage_path: "assets/user/user-23.mp4", thumbnail_path: "assets/user/user-23.jpg",
+        duration_seconds: 14, size_bytes: 1001897, visibility: "public", moderation_status: "approved",
+        rejection_reason: null, published_at: now(), created_at: now(), like_count: 0, comment_count: 0, category_ids: [] },
+      { id: "v-user-24", creator_id: "u-owner", caption: "",
+        storage_provider: "demo", storage_path: "assets/user/user-24.mp4", thumbnail_path: "assets/user/user-24.jpg",
+        duration_seconds: 20, size_bytes: 4037183, visibility: "public", moderation_status: "approved",
+        rejection_reason: null, published_at: now(), created_at: now(), like_count: 0, comment_count: 0, category_ids: [] },
+      { id: "v-user-25", creator_id: "u-owner", caption: "",
+        storage_provider: "demo", storage_path: "assets/user/user-25.mp4", thumbnail_path: "assets/user/user-25.jpg",
+        duration_seconds: 20, size_bytes: 165077, visibility: "public", moderation_status: "approved",
+        rejection_reason: null, published_at: now(), created_at: now(), like_count: 0, comment_count: 0, category_ids: [] }
     );
     return {
       profiles: creators, videos: vids, categories: CATEGORIES,
@@ -313,6 +378,17 @@
         return prof;
       },
       async logOut() { S.session = null; save(); },
+      async changePassword(newPassword, oldPassword) {
+        /* Demo accounts are local records with stored passwords, so the
+         * change is a genuine local update — same reality level as demo
+         * logIn/updateProfile. The 8+ rule matches the auth-screen tick
+         * and the live Appwrite requirement. */
+        const u = S.users.find((x) => x.profile_id === S.session);
+        if (!u) throw new Error("Not signed in.");
+        if (u.password !== String(oldPassword)) throw new Error("Current password is incorrect.");
+        if (String(newPassword).length < 8) throw new Error("New password must be at least 8 characters.");
+        u.password = String(newPassword); save();
+      },
       async currentUser() { return S.session ? profileOf(S.session) : null; },
       async usernameAvailable(username) {
         username = String(username || "").trim().toLowerCase();
@@ -954,7 +1030,7 @@
     if (hasBundle) {
       return {
         Query, Permission, Role, ID,
-        account: bundle.account || throwingService("Account", ["create", "createEmailPasswordSession", "deleteSession", "get", "createRecovery"]),
+        account: bundle.account || throwingService("Account", ["create", "createEmailPasswordSession", "deleteSession", "get", "createRecovery", "updatePassword"]),
         tables: bundle.tables || bundle.tablesDB || throwingService("TablesDB", ["listRows", "createRow", "updateRow", "deleteRow", "getRow", "upsertRow"]),
         storage: bundle.storage || throwingService("Storage", ["createFile", "getFileView", "getFileDownload", "deleteFile"]),
         functions: bundle.functions || throwingService("Functions", ["createExecution"]),
@@ -975,7 +1051,7 @@
      * crashing at construction time (demo mode never reaches here). */
     return {
       Query, Permission, Role, ID,
-      account: throwingService("Account", ["create", "createEmailPasswordSession", "deleteSession", "get", "createRecovery"]),
+      account: throwingService("Account", ["create", "createEmailPasswordSession", "deleteSession", "get", "createRecovery", "updatePassword"]),
       tables: throwingService("TablesDB", ["listRows", "createRow", "updateRow", "deleteRow", "getRow", "upsertRow"]),
       storage: throwingService("Storage", ["createFile", "getFileView", "getFileDownload", "deleteFile"]),
       functions: throwingService("Functions", ["createExecution"]),
@@ -1451,6 +1527,12 @@
         /* Idempotent: signing out with no session must not throw, or the
          * caller's reload/logout flow never runs. */
         try { await account.deleteSession({ sessionId: "current" }); } catch (e) { /* already signed out */ }
+      },
+      async changePassword(newPassword, oldPassword) {
+        /* PATCH /account/password. The session stays valid — Appwrite
+         * does not delete sessions on a password update. */
+        try { await account.updatePassword({ password: newPassword, oldPassword }); }
+        catch (e) { throw asError(e); }
       },
       async currentUser() {
         let authUser;
