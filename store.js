@@ -1789,7 +1789,7 @@
         if (pending) throw new Error("Your application is already under review.");
         const data = { user_id: me, full_name: String(info.full_name || "").slice(0, 80), category: info.category || "Creator", note: String(info.note || "").slice(0, 300), payment_method: info.method || "JazzCash", payment_tid: tid };
         try {
-          const doc = await tables.createRow({ databaseId: APPWRITE_DB, tableId: "verification_requests", rowId: ID.unique(), data, permissions: [readUser(me), readTeam(), updateTeam(), deleteTeam()] });
+          const doc = await tables.createRow({ databaseId: APPWRITE_DB, tableId: "verification_requests", rowId: ID.unique(), data, permissions: [readUser(me), updateUser(me), deleteUser(me)] });
           return mapRow(doc);
         } catch (e) { throw asError(e); }
       },
@@ -1968,7 +1968,7 @@
         }
         let created;
         try {
-          const doc = await tables.createRow({ databaseId: APPWRITE_DB, tableId: "comments", rowId: ID.unique(), data: { video_id: videoId, user_id: me, body: body.slice(0, 500) }, permissions: [readAny(), updateUser(me), updateTeam(), deleteUser(me), deleteTeam()] });
+          const doc = await tables.createRow({ databaseId: APPWRITE_DB, tableId: "comments", rowId: ID.unique(), data: { video_id: videoId, user_id: me, body: body.slice(0, 500) }, permissions: [readAny(), updateUser(me), deleteUser(me)] });
           created = mapRow(doc);
         } catch (e) { throw asError(e); }
         /* @mentions (respecting mention settings; best-effort). */
@@ -2015,14 +2015,18 @@
         let thumbFileId = m.thumbnailFileId || m.thumbnail_file_id || (isBareFileId(m.thumbnail_path) ? String(m.thumbnail_path).trim() : null) || null;
         let thumbPath = m.thumbnail_path || "";
         try {
+          /* Owner-only permissions here on purpose (spec §0: a user can
+           * only grant a permission they hold — team:admins grants are
+           * rejected for non-members). create-upload flips the file to
+           * the full template server-side with the API key. */
           if (!fileId && m.file && storage && typeof storage.createFile === "function") {
-            const uploaded = await storage.createFile({ bucketId: MEDIA_BUCKET, fileId: ID.unique(), file: m.file, permissions: [readUser(me), readTeam(), updateUser(me), updateTeam(), deleteUser(me), deleteTeam()] });
+            const uploaded = await storage.createFile({ bucketId: MEDIA_BUCKET, fileId: ID.unique(), file: m.file, permissions: [readUser(me), updateUser(me), deleteUser(me)] });
             fileId = (uploaded && (uploaded.$id || uploaded.id)) || null;
           }
           if (!thumbFileId && typeof thumbPath === "string" && thumbPath.indexOf("data:") === 0) {
             const blob = dataUrlToBlob(thumbPath);
             if (blob && storage && typeof storage.createFile === "function") {
-              const uploadedThumb = await storage.createFile({ bucketId: MEDIA_BUCKET, fileId: ID.unique(), file: blob, permissions: [readUser(me), readTeam(), updateUser(me), updateTeam(), deleteUser(me), deleteTeam()] });
+              const uploadedThumb = await storage.createFile({ bucketId: MEDIA_BUCKET, fileId: ID.unique(), file: blob, permissions: [readUser(me), updateUser(me), deleteUser(me)] });
               thumbFileId = (uploadedThumb && (uploadedThumb.$id || uploadedThumb.id)) || null;
             }
           }
@@ -2075,7 +2079,7 @@
       },
       async report(me, targetType, targetId, reason) {
         const data = { reporter_id: me, target_type: targetType, target_id: targetId, reason: String(reason).slice(0, 500) };
-        await createReport(data, [readUser(me), readTeam(), updateTeam(), deleteTeam()]);
+        await createReport(data, [readUser(me), updateUser(me), deleteUser(me)]);
       },
       async reportSound(me, soundId, reason) {
         if (!me) throw new Error("Sign in to report a sound.");
@@ -2088,7 +2092,7 @@
          * "sound" too (REPORT_TYPES), so the fallback files the
          * report server-side when the direct row write fails. */
         const data = { reporter_id: me, target_type: "sound", target_id: soundId, reason: clean };
-        await createReport(data, [readUser(me), readTeam(), updateTeam(), deleteTeam()]);
+        await createReport(data, [readUser(me), updateUser(me), deleteUser(me)]);
       },
       async toggleBlock(me, userId) {
         if (me === userId) throw new Error("You cannot block yourself.");
@@ -2191,7 +2195,7 @@
         if (!SOUND_CATEGORIES.some(([slug]) => slug === category)) throw new Error("Pick a sound category.");
         let path = String((input && input.src) || "").trim();
         if (input && input.file) {
-          const uploaded = await storage.createFile({ bucketId: MEDIA_BUCKET, fileId: ID.unique(), file: input.file, permissions: [readAny(), readTeam(), updateTeam(), deleteTeam()] });
+          const uploaded = await storage.createFile({ bucketId: MEDIA_BUCKET, fileId: ID.unique(), file: input.file, permissions: [readAny(), updateUser(me), deleteUser(me)] });
           path = (uploaded && (uploaded.$id || uploaded.id)) || "";
         }
         if (!path) throw new Error("Choose an audio file for the sound.");
@@ -2210,7 +2214,7 @@
         let row = null;
         try {
           const doc = await tables.createRow({ databaseId: APPWRITE_DB, tableId: "sounds", rowId: ID.unique(),
-            data: fullData, permissions: [readAny(), updateTeam(), deleteTeam()] });
+            data: fullData, permissions: [readAny(), updateUser(me), deleteUser(me)] });
           row = mapRow(doc);
         } catch (e) {
           /* The sounds table as documented has only the 5 legacy
@@ -2221,7 +2225,7 @@
           if (!isUnknownAttributeError(e)) throw asError(e);
           try {
             const doc = await tables.createRow({ databaseId: APPWRITE_DB, tableId: "sounds", rowId: ID.unique(),
-              data: legacyData, permissions: [readAny(), updateTeam(), deleteTeam()] });
+              data: legacyData, permissions: [readAny(), updateUser(me), deleteUser(me)] });
             row = mapRow(doc);
           } catch (e2) { throw asError(e2); }
         }
@@ -2306,7 +2310,7 @@
         let path = meta.storage_path || "";
         if (meta.file) {
           try {
-            const uploaded = await storage.createFile({ bucketId: MEDIA_BUCKET, fileId: ID.unique(), file: meta.file, permissions: [readUser(me), readTeam(), updateUser(me), updateTeam(), deleteUser(me), deleteTeam()] });
+            const uploaded = await storage.createFile({ bucketId: MEDIA_BUCKET, fileId: ID.unique(), file: meta.file, permissions: [readUser(me), updateUser(me), deleteUser(me)] });
             path = (uploaded && (uploaded.$id || uploaded.id)) || "";
           } catch (e) { throw asError(e); }
         }
@@ -2315,7 +2319,7 @@
             user_id: me, media_type: meta.media_type === "video" ? "video" : "image",
             storage_path: path, caption: String(meta.caption || "").slice(0, 200),
             duration_seconds: meta.duration_seconds || null,
-          }, permissions: [readUser(me), readTeam(), updateUser(me), updateTeam(), deleteUser(me), deleteTeam()] });
+          }, permissions: [readUser(me), updateUser(me), deleteUser(me)] });
           return mapStory(doc);
         } catch (e) { throw asError(e); }
       },

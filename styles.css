@@ -32,6 +32,16 @@ h1{font-size:26px;margin:8px 0} h2{font-size:22px;margin:6px 0} h3{font-size:16p
 .btn-ghost{background:#fff;border-color:var(--line);color:var(--ink)}
 .btn-danger{background:#fff;border-color:#f0caca;color:var(--error)}
 .btn-block{width:100%}
+
+/* Hover + press feedback: every tappable control must visibly react so
+   the cursor/finger position is always obvious (TikTok-style). */
+.btn,.icon-btn,.rail-btn .bubble,.ac-chip,.sound-tab,.fchip,.poll-opt,.edit-tool,.cam-record,.share-ico,.avatar-plus{transition:filter .15s ease,transform .12s ease}
+.btn:hover,.icon-btn:hover,.rail-btn:hover .bubble,.ac-chip:hover,.sound-tab:hover,.fchip:hover,.poll-opt:hover,.edit-tool:hover,.cam-record:hover,.share-ico:hover,.avatar-plus:hover{filter:brightness(1.15)}
+.btn:active,.icon-btn:active,.rail-btn:active .bubble,.ac-chip:active,.sound-tab:active,.fchip:active,.poll-opt:active,.edit-tool:active,.cam-record:active,.share-ico:active,.avatar-plus:active{transform:scale(.94)}
+.btn:disabled:hover,.btn:disabled:active{filter:none;transform:none}
+.menu-row:hover,.post-row:hover{background:rgba(0,0,0,.05)}
+.nav-btn:hover{color:var(--emerald)}
+.feed-tab:hover{color:#fff}
 .link-btn{color:var(--emerald);font-weight:600;font-size:14px;padding:8px;display:block;margin:4px auto}
 .icon-btn{width:40px;height:40px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:18px;background:rgba(255,255,255,.14);color:#fff}
 .check-row{display:flex;gap:10px;align-items:flex-start;font-size:13px;font-weight:500;margin:12px 0}
