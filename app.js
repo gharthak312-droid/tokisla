@@ -47,7 +47,7 @@
       set_title: "Settings and privacy", set_studio: "Tokisla Studio · Analytics", set_activity: "Activity center", set_account: "Account",
       set_changepw: "Change password",
       set_share: "Share profile", set_private: "Private account", set_blocked: "Blocked accounts", set_guidelines: "Community Guidelines",
-      set_terms: "Terms of Service", set_privacy: "Privacy Policy", set_delete: "Delete my account", set_logout: "Log out",
+      set_rules: "Tokisla Rules", set_terms: "Terms of Service", set_privacy: "Privacy Policy", set_delete: "Delete my account", set_logout: "Log out",
       set_display: "Display", set_language: "Language", disp_dark: "Dark", disp_light: "Light",
       allow_title: "Allow", allow_comments: "Who can comment", allow_mentions: "Who can mention you", allow_likes: "Who can like your videos",
       allow_downloads: "Who can download your videos", allow_followlist: "Who can view your follow lists" },
@@ -2071,6 +2071,12 @@
       <li>No women appear in videos, and nothing haram — no music, no songs, no instruments.</li>
       <li>Posts go live immediately. Videos that break these rules are removed when reported, and strikes apply: repeated violations can lead to removal, restricted features, suspension or a permanent ban.</li>
     </ul><p class="muted">Breaking the rules can lead to removal, restricted features, suspension or a permanent ban. You may appeal any decision from the app.</p>`;
+  const RULES = `<p><b>Tokisla Rules.</b> Tokisla is a platform: videos are posted by users and go live immediately. The following content is restricted and will be removed:</p>
+    <ul style="line-height:1.55;padding-left:18px">
+      <li><b>Bold and nude content</b> — no nudity, sexual or suggestive content.</li>
+      <li><b>Weapons</b> — no videos showing or promoting weapons.</li>
+      <li><b>Pornography</b> — no explicit sexual content.</li>
+    </ul><p><b>Enforcement.</b> Restricted content is removed when it is reported. A warning applies on the first violation, and strikes apply to repeated violations: repeated violations can lead to restricted features, suspension or a permanent ban. You may appeal any decision from the app.</p><p class="muted">Videos must be 20 seconds or shorter.</p>`;
   const TERMS = `<div style="line-height:1.65">
   <p><b>1. Your account.</b> You must be at least 13 years old to use Tokisla. You are responsible for your account, your password and everything posted through it. One person, one account — impersonation is not allowed.</p>
   <p><b>2. Your content.</b> You keep ownership of the videos you upload. By uploading, you give Tokisla permission to store, process and show your video inside the app so other users can watch it. Only upload content you created or have clear permission to share.</p>
@@ -2118,6 +2124,7 @@
       <button class="menu-row" id="stBlocked"><span class="menu-ico">${icon("ban")}</span> ${t("set_blocked")}</button>
       <div class="share-sec">About</div>
       <button class="menu-row" id="stGuidelines"><span class="menu-ico">${icon("shield")}</span> ${t("set_guidelines")}</button>
+      <button class="menu-row" id="stRules"><span class="menu-ico">${icon("shield")}</span> ${t("set_rules")}</button>
       <button class="menu-row" id="stTerms"><span class="menu-ico">${icon("file")}</span> ${t("set_terms")}</button>
       <button class="menu-row" id="stPrivacy"><span class="menu-ico">${icon("lock")}</span> ${t("set_privacy")}</button>
       <button class="menu-row danger" id="stDelete"><span class="menu-ico">${icon("trash")}</span> ${t("set_delete")}</button>
@@ -2142,6 +2149,7 @@
     allowBind("#stAllowDownload", "allow_download", "allow_downloads");
     allowBind("#stAllowFollowList", "view_follow_list", "allow_followlist", ["everyone", "onlyme"]);
     $("#stGuidelines").addEventListener("click", () => openActionSheet(t("set_guidelines"), GUIDELINES));
+    $("#stRules").addEventListener("click", () => openActionSheet(t("set_rules"), RULES));
     $("#stTerms").addEventListener("click", () => openActionSheet(t("set_terms"), TERMS));
     $("#stPrivacy").addEventListener("click", () => openActionSheet(t("set_privacy"), PRIVACY));
     $("#stBlocked").addEventListener("click", async () => {

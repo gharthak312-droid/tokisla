@@ -233,7 +233,11 @@ body{background:#07070C}
   .side-profile .side-who{min-width:0;text-align:start}
   .side-profile b{display:block;font-size:14.5px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .side-profile small{display:block;font-size:12.5px;color:rgba(255,255,255,.65);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .app-shell{width:412px;height:min(892px,100dvh);flex:none;margin:0 auto;border-radius:36px;overflow:hidden;box-shadow:0 30px 80px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.16)}
+  /* Stage matches a 9:16 video (TikTok-web shape): portrait videos fill
+     the column edge to edge with no side bars; landscape videos stay an
+     uncropped strip inside it. Width also follows short windows so the
+     stage never grows wider than the video it shows. */
+  .app-shell{width:min(502px,calc(100dvw - 264px),calc(min(892px,100dvh) * 9 / 16));height:min(892px,100dvh);flex:none;margin:0 auto;border-radius:36px;overflow:hidden;box-shadow:0 30px 80px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.16)}
   .bottom-nav{display:none}
   /* Overlays recenter on the free space beside the sidebar (240px). */
   .sheet{left:calc(50% + 120px)}
