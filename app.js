@@ -153,6 +153,7 @@
     more: '<circle cx="5" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.7" fill="currentColor" stroke="none"/>',
     close: '<path d="m6 6 12 12M18 6 6 18"/>',
     play: '<path d="M8 5.4v13.2L18.5 12Z" fill="currentColor" stroke="none"/>',
+    pause: '<path d="M7.5 5h3.4v14H7.5zM13.1 5h3.4v14h-3.4z" fill="currentColor" stroke="none"/>',
     settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
     userPlus: '<circle cx="10" cy="8" r="3.5"/><path d="M3.5 19.5c1.1-2.9 3.5-4.4 6.5-4.4 1.2 0 2.3.2 3.3.7"/><path d="M18.5 8v6M15.5 11h6"/>',
     link: '<path d="M10 14a5 5 0 0 0 7.1 0l2-2a5 5 0 0 0-7.1-7.1l-1.2 1.1"/><path d="M14 10a5 5 0 0 0-7.1 0l-2 2A5 5 0 0 0 12 19.1l1.2-1.1"/>',
@@ -439,6 +440,33 @@
     observeSlides();
   }
   const countedViews = new Set();
+  // Autoplay: browsers block playback WITH sound before the user has
+  // interacted with the page, so the first play attempt falls back to
+  // muted playback (motion starts at once) and the first tap/keypress
+  // anywhere unlocks sound. Space toggles the visible video, TikTok-style.
+  let soundUnlocked = false, activeVid = null;
+  async function tryPlay(x) {
+    x.muted = false;
+    try { await x.play(); delete x.dataset.autoMuted; return; }
+    catch (e) {}
+    x.muted = true; x.dataset.autoMuted = "1";
+    try { await x.play(); } catch (e2) {}
+  }
+  function unlockSound() {
+    if (soundUnlocked) return;
+    soundUnlocked = true;
+    if (activeVid) { activeVid.muted = false; delete activeVid.dataset.autoMuted; }
+  }
+  window.addEventListener("pointerdown", unlockSound);
+  window.addEventListener("keydown", (e) => {
+    unlockSound();
+    if (e.code !== "Space" && e.key !== " ") return;
+    const tg = e.target;
+    if (tg && (tg.tagName === "INPUT" || tg.tagName === "TEXTAREA" || tg.tagName === "SELECT" || tg.tagName === "BUTTON" || tg.isContentEditable)) return;
+    if (!atFeedRoot() || !activeVid) return;
+    e.preventDefault();
+    if (activeVid.paused) tryPlay(activeVid); else activeVid.pause();
+  });
   function observeSlides() {
     if (observer) observer.disconnect();
     observer = new IntersectionObserver((entries) => {
@@ -446,11 +474,13 @@
         const vids = en.target.querySelectorAll("video");
         if (!vids.length) return;
         if (en.intersectionRatio >= 0.6) {
-          vids.forEach((x) => x.play().catch(() => {}));
+          activeVid = en.target.querySelector("video.duet-main") || vids[0];
+          vids.forEach((x) => { tryPlay(x); });
+          setTimeout(() => { if (activeVid && activeVid.paused) en.target._showPlayState?.("pause"); }, 400);
           const id = en.target.dataset.id;
           if (id && !countedViews.has(id)) { countedViews.add(id); store.recordView(id, me ? me.id : null).catch(() => {}); }
         }
-        else { vids.forEach((x) => x.pause()); }
+        else { vids.forEach((x) => x.pause()); if (activeVid && en.target.contains(activeVid)) activeVid = null; }
       });
     }, { root: $("#feed"), threshold: [0, 0.6, 1] });
     $$("#feed .slide").forEach((s) => observer.observe(s));
@@ -509,6 +539,7 @@
       ${duet ? `<div class="duet-wrap"><video class="duet-src" src="${esc(sessionUploads[duet.id] || duet.storage_path)}" loop playsinline preload="metadata"></video><video class="duet-main" src="${esc(src)}" ${v.thumbnail_path ? `poster="${esc(v.thumbnail_path)}"` : ""} loop playsinline preload="metadata" ${filt ? `style="filter:${filt}"` : ""}></video></div>`
         : `<video src="${esc(src)}" ${v.thumbnail_path ? `poster="${esc(v.thumbnail_path)}"` : ""} loop playsinline preload="metadata" ${filt ? `style="filter:${filt}"` : ""}></video>`}
       <div class="scrim"></div>
+      <div class="play-state" aria-hidden="true"></div>
       <div class="rail">
         <div class="rail-profile"><img class="avatar" data-act="profile" src="${esc(v.avatar_url || "")}" alt="" onerror="this.style.background='var(--emerald)';this.removeAttribute('src')"><button class="rail-follow" data-act="follow" aria-label="Follow creator">${icon("plus")}</button></div>
         <button class="rail-btn" data-act="like"><span class="bubble">${icon("heart")}</span><span data-like-count>${fmt(v.like_count)}</span></button>
@@ -528,6 +559,24 @@
       </div>
       <div class="progress"><i></i></div>`;
     const vid = slide.querySelector("video.duet-main") || slide.querySelector("video");
+    // Center play/pause/buffering indicator (TikTok-style): a pause icon
+    // stays visible while paused, a play icon flashes on resume, and a
+    // spinner shows while the video is buffering — so a pause is never
+    // mistaken for a network stall.
+    const stateEl = slide.querySelector(".play-state");
+    let flashTimer = null;
+    const showPlayState = (kind) => {
+      if (!stateEl) return;
+      if (kind === "pause") { stateEl.innerHTML = icon("pause"); stateEl.classList.add("show"); stateEl.classList.remove("spin"); }
+      else if (kind === "spin") { stateEl.innerHTML = ""; stateEl.classList.add("show", "spin"); }
+      else if (kind === "play") { stateEl.innerHTML = icon("play"); stateEl.classList.add("show"); stateEl.classList.remove("spin"); clearTimeout(flashTimer); flashTimer = setTimeout(() => stateEl.classList.remove("show"), 450); }
+      else { stateEl.classList.remove("show", "spin"); }
+    };
+    slide._showPlayState = showPlayState;
+    vid.addEventListener("pause", () => { if (!vid.ended) showPlayState("pause"); });
+    vid.addEventListener("play", () => showPlayState("play"));
+    vid.addEventListener("waiting", () => showPlayState("spin"));
+    vid.addEventListener("playing", () => { if (!vid.paused) showPlayState("hide"); });
     // Trim (Crop) from the edit screen: keep playback inside the trimmed
     // range when the video carries one.
     const trimStart = Number(v.trim_start_seconds) || 0;
