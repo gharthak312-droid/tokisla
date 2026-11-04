@@ -476,6 +476,12 @@
         if (en.intersectionRatio >= 0.6) {
           activeVid = en.target.querySelector("video.duet-main") || vids[0];
           vids.forEach((x) => { tryPlay(x); });
+          /* Prefetch: let the visible clip — and the next one — buffer
+             fully (preload auto) so playback does not keep stalling
+             while the file host's route catches up. */
+          try { vids.forEach((x) => { x.preload = "auto"; }); } catch (e) {}
+          const nextSlide = en.target.nextElementSibling;
+          if (nextSlide) { const nv = nextSlide.querySelector("video"); if (nv) { try { nv.preload = "auto"; nv.load(); } catch (e) {} } }
           setTimeout(() => { if (activeVid && activeVid.paused) en.target._showPlayState?.("pause"); }, 400);
           const id = en.target.dataset.id;
           if (id && !countedViews.has(id)) { countedViews.add(id); store.recordView(id, me ? me.id : null).catch(() => {}); }
@@ -564,10 +570,15 @@
     // spinner shows while the video is buffering — so a pause is never
     // mistaken for a network stall.
     const stateEl = slide.querySelector(".play-state");
+    let spinTimer = null;
     const showPlayState = (kind) => {
       if (!stateEl) return;
+      if (spinTimer) { clearTimeout(spinTimer); spinTimer = null; }
       if (kind === "pause") { stateEl.innerHTML = icon("pause"); stateEl.classList.add("show"); stateEl.classList.remove("spin"); }
-      else if (kind === "spin") { stateEl.innerHTML = ""; stateEl.classList.add("show", "spin"); }
+      /* Buffering circle: only show it when the stall actually lasts —
+         a 450ms grace period keeps micro-stalls from flashing the
+         circle again and again on a slow route to the file host. */
+      else if (kind === "spin") { spinTimer = setTimeout(() => { stateEl.innerHTML = ""; stateEl.classList.add("show", "spin"); }, 450); }
       else { stateEl.classList.remove("show", "spin"); }
     };
     slide._showPlayState = showPlayState;
