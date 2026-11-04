@@ -564,17 +564,15 @@
     // spinner shows while the video is buffering — so a pause is never
     // mistaken for a network stall.
     const stateEl = slide.querySelector(".play-state");
-    let flashTimer = null;
     const showPlayState = (kind) => {
       if (!stateEl) return;
       if (kind === "pause") { stateEl.innerHTML = icon("pause"); stateEl.classList.add("show"); stateEl.classList.remove("spin"); }
       else if (kind === "spin") { stateEl.innerHTML = ""; stateEl.classList.add("show", "spin"); }
-      else if (kind === "play") { stateEl.innerHTML = icon("play"); stateEl.classList.add("show"); stateEl.classList.remove("spin"); clearTimeout(flashTimer); flashTimer = setTimeout(() => stateEl.classList.remove("show"), 450); }
       else { stateEl.classList.remove("show", "spin"); }
     };
     slide._showPlayState = showPlayState;
     vid.addEventListener("pause", () => { if (!vid.ended) showPlayState("pause"); });
-    vid.addEventListener("play", () => showPlayState("play"));
+    vid.addEventListener("play", () => showPlayState("hide"));
     vid.addEventListener("waiting", () => showPlayState("spin"));
     vid.addEventListener("playing", () => { if (!vid.paused) showPlayState("hide"); });
     // Trim (Crop) from the edit screen: keep playback inside the trimmed
