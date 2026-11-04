@@ -31,6 +31,41 @@
   let commentVideoId = null;
   let sessionUploads = {}; // demo: videoId -> object URL (plays this session only)
   let observer = null;
+  let feedUnsub = null;
+  /* Live counts: a realtime subscription on the videos table pushes
+   * every view/like/comment change to the open feed, so the numbers
+   * on screen move without a refresh. Channel verified live against
+   * the Singapore endpoint 2026-11-05 (the server accepted the
+   * tables-style channel). Best-effort throughout: realtime must
+   * never break the feed render. */
+  function applyLiveRow(row) {
+    if (!row || !row.$id) return;
+    const slide = document.querySelector('.slide[data-id="' + row.$id + '"]');
+    if (!slide) return;
+    const likeEl = slide.querySelector("[data-like-count]");
+    if (likeEl && typeof row.like_count === "number") {
+      likeEl.textContent = fmt(row.like_count);
+      likeEl.dataset.raw = String(row.like_count);
+    }
+    const comEl = slide.querySelector("[data-comment-count]");
+    if (comEl && typeof row.comment_count === "number") comEl.textContent = fmt(row.comment_count);
+  }
+  function subscribeFeedLive() {
+    try {
+      if (feedUnsub) { feedUnsub(); feedUnsub = null; }
+      if (!backend || !backend.client || typeof backend.client.subscribe !== "function") return;
+      // Database id "tokisla" must match APPWRITE_DB in store.js.
+      feedUnsub = backend.client.subscribe(
+        ["databases.tokisla.tables.videos.rows"],
+        (msg) => {
+          try {
+            const row = msg && (msg.payload || msg);
+            if (row && row.$id) applyLiveRow(row);
+          } catch (e) { /* live update failed: the next render still shows fresh numbers */ }
+        }
+      );
+    } catch (e) { /* realtime unavailable: counts still refresh on render */ }
+  }
 
 
   /* ---------------- language + display ----------------
@@ -438,6 +473,7 @@
     $("#feedEmpty").classList.toggle("hidden", list.length > 0);
     list.forEach((v) => feedEl.appendChild(slideEl(v)));
     observeSlides();
+    subscribeFeedLive();
   }
   const countedViews = new Set();
   // Autoplay: browsers block playback WITH sound before the user has

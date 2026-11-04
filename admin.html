@@ -73,10 +73,16 @@
       <div id="loginError" class="err hidden"></div>
       <button class="btn btn-primary" style="width:100%" type="submit">Sign in</button>
     </form>
+    <div style="margin:14px 0 10px;text-align:center" class="muted small">— ya —</div>
+    <div class="field"><label>Aarzi default password (filhal ke liye)</label><input id="defaultPassword" type="password" autocomplete="off" placeholder="Default password"></div>
+    <div id="defaultError" class="err hidden"></div>
+    <button class="btn btn-ghost" id="defaultEnterBtn" style="width:100%" type="button">Default password se kholo</button>
+    <p class="muted small" style="margin:10px 0 0;line-height:1.5">Ye aarzi rasta hai: password is page ke code me likha hai, is liye ye sirf dekhne ke liye hai. Buttons (approve / remove waghera) asal admin account ke baghair nahi chalenge. Asal security andar se lagayenge.</p>
   </div>
 
   <!-- Panel -->
   <div id="panel" class="hidden">
+    <div id="tempBanner" class="hidden" style="background:#fdf3d7;border:1px solid #e7cf8a;border-radius:10px;padding:10px 12px;font-size:13px;margin-bottom:12px"><b>Aarzi entry:</b> default password se khula hai — sirf dekhne ke liye. Buttons asal admin account ke baghair nahi chalenge.</div>
     <div class="tabs">
       <button class="tab active" data-tab="dashboard">Dashboard</button>
       <button class="tab" data-tab="queue">Moderation Queue <span id="queueCount"></span></button>
@@ -90,6 +96,12 @@
 
     <section id="tab-dashboard">
       <div class="stats" id="statCards"></div>
+      <div class="card" style="margin-top:14px">
+        <h3 style="margin:0 0 6px">Live analytics <span class="small" style="color:#0a7d4f">● LIVE</span></h3>
+        <div class="stats" id="analyticsStats"></div>
+        <div id="topVideos" style="margin-top:10px"></div>
+        <p class="muted small" style="margin:8px 0 0">Har 30 second me khud taza hota hai.</p>
+      </div>
       <div class="card" style="margin-top:14px">
         <h3 style="margin:0 0 6px">How moderation works</h3>
         <p class="muted" style="line-height:1.6;margin:0">Posts go live <b>immediately</b> — there is no pre-publication review and nothing waits here to be published. When a video is reported for breaking the rules (music, women, haram content), act on it in the Reports tab: remove it and apply a strike. The Moderation Queue below only holds older videos that were pending before this change. You can still Approve, Reject (with a reason the creator will see), or mark Needs review on those.</p>
@@ -167,6 +179,14 @@
   }
   const store = window.TokislaStore.createStore(window.localStorage, backend);
   let me = null;
+  let analyticsTimer = null;
+  /* AARZI default password (owner ka faisla 2026-11-05): admin panel
+   * filhal is se khulta hai, kyunke asal account ka password bhool
+   * gaya hai aur profile par admin role nahi laga. Ye password is
+   * page ke code me public hai — asal security (apna account + admin
+   * role) lagte hi is block ko HATA DENA hai. */
+  const DEFAULT_ADMIN_PASSWORD = "tokisla123";
+  const DEFAULT_ME = { id: "default-admin", username: "admin", role: "aarzi admin" };
   const REASONS = ["Contains music", "Inappropriate content", "Spam or misleading", "Abuse or harassment", "Religious disrespect", "Low quality / unclear", "Other"];
 
   function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.remove("hidden"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.add("hidden"), 2600); }
@@ -176,6 +196,11 @@
     if (DEMO) { $("#modeBadge").classList.remove("hidden"); $("#demoCreds").classList.remove("hidden"); await store.ensureDemoAdmin(); }
     me = await store.currentUser().catch(() => null);
     if (me && (me.role === "admin" || me.role === "moderator")) enterPanel();
+    else if (!me) {
+      try {
+        if (sessionStorage.getItem("tokisla-default-admin") === "1") { me = DEFAULT_ME; enterPanel(true); }
+      } catch (e) { /* storage unavailable: password har dafa mangna hoga */ }
+    }
   }
   $("#loginForm").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -189,21 +214,37 @@
       me = p; enterPanel();
     } catch (ex) { err.textContent = ex.message || "Sign-in failed."; err.classList.remove("hidden"); }
   });
-  $("#logoutBtn").addEventListener("click", async () => { await store.logOut(); location.reload(); });
+  $("#defaultEnterBtn").addEventListener("click", () => {
+    const err = $("#defaultError"); err.classList.add("hidden");
+    if ($("#defaultPassword").value === DEFAULT_ADMIN_PASSWORD) {
+      try { sessionStorage.setItem("tokisla-default-admin", "1"); } catch (e) {}
+      me = DEFAULT_ME; enterPanel(true);
+    } else { err.textContent = "Ghalat password."; err.classList.remove("hidden"); }
+  });
+  $("#logoutBtn").addEventListener("click", async () => {
+    try { sessionStorage.removeItem("tokisla-default-admin"); } catch (e) {}
+    try { await store.logOut(); } catch (e) { /* no session: nothing to close */ }
+    location.reload();
+  });
 
-  function enterPanel() {
+  function enterPanel(temp) {
     $("#loginCard").classList.add("hidden");
     $("#panel").classList.remove("hidden");
     $("#logoutBtn").classList.remove("hidden");
+    $("#tempBanner").classList.toggle("hidden", !temp);
     $("#adminName").textContent = "@" + me.username + " (" + me.role + ")";
     refreshAll();
+    if (analyticsTimer) clearInterval(analyticsTimer);
+    analyticsTimer = setInterval(() => {
+      if (!$("#panel").classList.contains("hidden")) renderAnalytics();
+    }, 30000);
   }
   $$(".tab").forEach((t) => t.addEventListener("click", () => {
     $$(".tab").forEach((x) => x.classList.toggle("active", x === t));
     ["dashboard", "queue", "stories", "reports", "users", "sounds", "categories", "log"].forEach((n) => $("#tab-" + n).classList.toggle("hidden", n !== t.dataset.tab));
     refreshAll();
   }));
-  async function refreshAll() { renderStats(); renderQueue(); renderStories(); renderReports(); renderUsers(); renderVerify(); renderSounds(); renderCategories(); renderLog(); }
+  async function refreshAll() { renderStats(); renderAnalytics(); renderQueue(); renderStories(); renderReports(); renderUsers(); renderVerify(); renderSounds(); renderCategories(); renderLog(); }
 
   /* ---- Sounds library (admin adds audio; users add sounds too, direct-to-library; originals auto-register) ---- */
   function soundDurationOf(file) {
@@ -306,6 +347,18 @@
       ["Users", s.users], ["Approved videos", s.approved], ["Pending review", s.pending],
       ["Rejected videos", s.rejected], ["Open reports", s.openReports],
     ].map(([l, n]) => `<div class="stat"><div class="n">${n}</div><div class="l">${l}</div></div>`).join("");
+  }
+
+  async function renderAnalytics() {
+    if (typeof store.adminAnalytics !== "function") return;
+    const a = await store.adminAnalytics().catch(() => null); if (!a) return;
+    $("#analyticsStats").innerHTML = [
+      ["Total views", a.totalViews], ["Total likes", a.totalLikes],
+      ["Total comments", a.totalComments], ["Approved videos", a.videos],
+    ].map(([l, n]) => `<div class="stat"><div class="n">${n}</div><div class="l">${l}</div></div>`).join("");
+    $("#topVideos").innerHTML = a.top.length
+      ? '<h4 style="margin:0 0 8px">Top videos (views)</h4>' + a.top.map((v) => `<div class="row-item"><div class="grow"><div style="font-weight:600">${esc(v.caption || "Untitled")}</div><div class="small muted">@${esc(v.username || v.creator_id)} · ${v.view_count || 0} views · ${v.like_count || 0} likes · ${v.comment_count || 0} comments</div></div></div>`).join("")
+      : '<p class="muted" style="margin:0">Abhi koi approved video nahi hai.</p>';
   }
 
   async function renderQueue() {

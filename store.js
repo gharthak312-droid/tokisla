@@ -1691,6 +1691,18 @@
       async recordView(videoId, me) {
         /* Best-effort throughout: a failed view count must never break
          * playback. The function increments only approved videos. */
+        if (!me) {
+          /* Guests count too (the function accepts guest increments),
+           * but only once per browser session per video — the session
+           * set stops refresh spam from inflating the count. */
+          try {
+            const key = "tokisla-viewed";
+            const seen = new Set(JSON.parse(sessionStorage.getItem(key) || "[]"));
+            if (seen.has(videoId)) return;
+            seen.add(videoId);
+            sessionStorage.setItem(key, JSON.stringify(Array.from(seen)));
+          } catch (e) { /* storage unavailable: fall through to the call */ }
+        }
         try { await callApi("increment-view", { video_id: videoId }); } catch (e) {}
         if (me) {
           try {
@@ -2413,6 +2425,21 @@
           countRows("reports", [Q.equal("status", "open")]),
         ]);
         return { users: u || 0, approved: a || 0, pending: p || 0, rejected: r || 0, openReports: rep || 0 };
+      },
+      /* Live analytics: totals + top videos by views. Reads the 100
+       * most-viewed approved videos, so totals are exact while the
+       * catalog stays under 100 videos. */
+      async adminAnalytics() {
+        const vids = await listMapped("videos", [Q.orderDesc("view_count"), Q.limit(100)], mapVideo).catch(() => []);
+        const approved = vids.filter((v) => v.moderation_status === "approved");
+        const sum = (k) => approved.reduce((a, v) => a + (Number(v[k]) || 0), 0);
+        return {
+          totalViews: sum("view_count"),
+          totalLikes: sum("like_count"),
+          totalComments: sum("comment_count"),
+          videos: approved.length,
+          top: approved.slice(0, 10),
+        };
       },
       async deleteAccount(me) {
         try {

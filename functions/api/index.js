@@ -205,6 +205,18 @@ async function authenticate(req, cfg) {
   return String(me.$id);
 }
 
+// Guest-tolerant variant: returns null when there is no usable JWT
+// instead of throwing. Only actions marked auth: "guest" use it —
+// currently just increment-view, so guest views can be counted.
+async function authenticateOptional(req, cfg) {
+  try {
+    return await authenticate(req, cfg);
+  } catch (e) {
+    if (e && e.status === 401) return null;
+    throw e;
+  }
+}
+
 async function teamRoles(teams, userId) {
   const roles = new Set();
   let offset = 0;
@@ -1651,7 +1663,7 @@ const HANDLERS = {
   "create-profile": { fn: actionCreateProfile, auth: "signed-in" },
   "create-upload": { fn: actionCreateUpload, auth: "signed-in" },
   "delete-account": { fn: actionDeleteAccount, auth: "signed-in" },
-  "increment-view": { fn: actionIncrementView, auth: "signed-in" },
+  "increment-view": { fn: actionIncrementView, auth: "guest" },
   "publish-draft": { fn: actionPublishDraft, auth: "signed-in" },
   "set-comment-pin": { fn: actionSetCommentPin, auth: "signed-in" },
   "moderate-video": { fn: actionModerateVideo, auth: "staff" },
@@ -1700,7 +1712,11 @@ export default async ({ req, res, log, error: logError }) => {
     if (!action || !handler) {
       throw badRequest(action ? `Unknown action: ${action}` : "action is required.");
     }
-    const callerId = await authenticate(req, cfg);
+    // Guest actions skip the 401: authenticateOptional returns null
+    // for anonymous callers, and the handler must not need a caller id.
+    const callerId = handler.auth === "guest"
+      ? await authenticateOptional(req, cfg)
+      : await authenticate(req, cfg);
     const client = privilegedClient(cfg);
     const db = new TablesDB(client);
     const storage = new Storage(client);
