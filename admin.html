@@ -97,10 +97,10 @@
     <section id="tab-dashboard">
       <div class="stats" id="statCards"></div>
       <div class="card" style="margin-top:14px">
-        <h3 style="margin:0 0 6px">Live analytics <span class="small" style="color:#0a7d4f">● LIVE</span></h3>
+        <h3 style="margin:0 0 6px">Live analytics <span class="small" style="color:#0a7d4f">● LIVE</span> <span id="analyticsUpdated" class="small muted" style="font-weight:400"></span></h3>
         <div class="stats" id="analyticsStats"></div>
         <div id="topVideos" style="margin-top:10px"></div>
-        <p class="muted small" style="margin:8px 0 0">Har 30 second me khud taza hota hai.</p>
+        <p class="muted small" style="margin:8px 0 0">Naya view / like / comment aate hi numbers foran badal jate hain; har 30 second me bhi khud taza hota hai.</p>
       </div>
       <div class="card" style="margin-top:14px">
         <h3 style="margin:0 0 6px">How moderation works</h3>
@@ -180,6 +180,8 @@
   const store = window.TokislaStore.createStore(window.localStorage, backend);
   let me = null;
   let analyticsTimer = null;
+  let liveUnsub = null;
+  let liveTimer = null;
   /* AARZI default password (owner ka faisla 2026-11-05): admin panel
    * filhal is se khulta hai, kyunke asal account ka password bhool
    * gaya hai aur profile par admin role nahi laga. Ye password is
@@ -238,6 +240,37 @@
     analyticsTimer = setInterval(() => {
       if (!$("#panel").classList.contains("hidden")) renderAnalytics();
     }, 30000);
+    subscribeAdminLive();
+  }
+
+  /* Live dashboard: every row change in videos / profiles / reports
+   * re-renders the numbers (debounced, so a burst of views causes one
+   * refresh). The lists on the other tabs keep their own refresh on
+   * tab click — re-rendering them live would reset audio previews and
+   * scroll positions. Best-effort: realtime must never break the panel. */
+  function subscribeAdminLive() {
+    try {
+      if (liveUnsub) { liveUnsub(); liveUnsub = null; }
+      if (!backend || !backend.client || typeof backend.client.subscribe !== "function") return;
+      // Database id "tokisla" must match APPWRITE_DB in store.js.
+      liveUnsub = backend.client.subscribe(
+        [
+          "databases.tokisla.tables.videos.rows",
+          "databases.tokisla.tables.profiles.rows",
+          "databases.tokisla.tables.reports.rows",
+        ],
+        (msg) => {
+          try {
+            const row = msg && (msg.payload || msg);
+            if (!row || !row.$id) return;
+            if (liveTimer) clearTimeout(liveTimer);
+            liveTimer = setTimeout(() => {
+              if (!$("#panel").classList.contains("hidden")) { renderStats(); renderAnalytics(); }
+            }, 800);
+          } catch (e) { /* live refresh failed: the 30s timer still updates the numbers */ }
+        }
+      );
+    } catch (e) { /* realtime unavailable: the 30s timer still updates the numbers */ }
   }
   $$(".tab").forEach((t) => t.addEventListener("click", () => {
     $$(".tab").forEach((x) => x.classList.toggle("active", x === t));
@@ -357,8 +390,10 @@
       ["Total comments", a.totalComments], ["Approved videos", a.videos],
     ].map(([l, n]) => `<div class="stat"><div class="n">${n}</div><div class="l">${l}</div></div>`).join("");
     $("#topVideos").innerHTML = a.top.length
-      ? '<h4 style="margin:0 0 8px">Top videos (views)</h4>' + a.top.map((v) => `<div class="row-item"><div class="grow"><div style="font-weight:600">${esc(v.caption || "Untitled")}</div><div class="small muted">@${esc(v.username || v.creator_id)} · ${v.view_count || 0} views · ${v.like_count || 0} likes · ${v.comment_count || 0} comments</div></div></div>`).join("")
+      ? '<h4 style="margin:0 0 8px">Sab videos — views ke hisab se (' + a.top.length + ')</h4>' + a.top.map((v) => `<div class="row-item"><div class="grow"><div style="font-weight:600">${esc(v.caption || "Untitled")}</div><div class="small muted">@${esc(v.username || v.creator_id)} · ${v.view_count || 0} views · ${v.like_count || 0} likes · ${v.comment_count || 0} comments</div></div></div>`).join("")
       : '<p class="muted" style="margin:0">Abhi koi approved video nahi hai.</p>';
+    const upd = $("#analyticsUpdated");
+    if (upd) upd.textContent = "· aakhri update: " + new Date().toLocaleTimeString();
   }
 
   async function renderQueue() {

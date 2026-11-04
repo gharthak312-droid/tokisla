@@ -2426,9 +2426,9 @@
         ]);
         return { users: u || 0, approved: a || 0, pending: p || 0, rejected: r || 0, openReports: rep || 0 };
       },
-      /* Live analytics: totals + top videos by views. Reads the 100
-       * most-viewed approved videos, so totals are exact while the
-       * catalog stays under 100 videos. */
+      /* Live analytics: totals + every approved video by views. Reads
+       * the 100 most-viewed approved videos, so totals are exact while
+       * the catalog stays under 100 videos. */
       async adminAnalytics() {
         const vids = await listMapped("videos", [Q.orderDesc("view_count"), Q.limit(100)], mapVideo).catch(() => []);
         const approved = vids.filter((v) => v.moderation_status === "approved");
@@ -2438,7 +2438,7 @@
           totalLikes: sum("like_count"),
           totalComments: sum("comment_count"),
           videos: approved.length,
-          top: approved.slice(0, 10),
+          top: approved,
         };
       },
       async deleteAccount(me) {
