@@ -488,6 +488,11 @@ body{background:#07070C}
 .filter-chips{display:flex;gap:8px;flex-wrap:wrap}
 .fchip{padding:8px 14px;border-radius:999px;border:1.5px solid var(--line);background:var(--card);font-weight:600;font-size:13.5px;cursor:pointer;color:inherit}
 .fchip.active{background:linear-gradient(92deg,#7C3AED,#DB2777);border-color:transparent;color:#fff}
+/* Dark mode: --card stays white (no dark override), while inherited text
+ * turns near-white — so unstyled chips were white-on-white and the
+ * Normal/Warm/Cool/Mono/Vivid labels were invisible on the camera and
+ * edit screens. Dark chip surface + light text, like .ac-chip/.chip. */
+[data-theme="dark"] .fchip{background:#15151E;border-color:#282833;color:#F1F0F6}
 .ctx-banner{display:flex;align-items:center;gap:8px;background:var(--emerald-soft);border:1px solid var(--line);border-radius:12px;padding:9px 12px;font-size:13.5px;margin-bottom:12px}
 .ctx-banner span{flex:1}
 .ctx-clear{background:none;border:none;cursor:pointer;color:inherit;display:flex;padding:2px}
