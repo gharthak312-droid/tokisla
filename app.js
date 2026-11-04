@@ -561,7 +561,7 @@
            off every download at once, so it opens fast and stays
            fast when more people use it. */
         vids.forEach((x) => { if (!x.getAttribute("src") && x.dataset.src) { try { x.src = x.dataset.src; } catch (e) {} } });
-        if (en.intersectionRatio >= 0.6) {
+        if (en.intersectionRatio >= 0.6 && !document.hidden) {
           activeVid = en.target.querySelector("video.duet-main") || vids[0];
           vids.forEach((x) => { tryPlay(x); });
           /* Prefetch: let the visible clip — and the next one — buffer
@@ -574,7 +574,13 @@
           const id = en.target.dataset.id;
           if (id && !countedViews.has(id)) { countedViews.add(id); store.recordView(id, me ? me.id : null).catch(() => {}); }
         }
-        else { vids.forEach((x) => x.pause()); if (activeVid && en.target.contains(activeVid)) activeVid = null; }
+        /* While the tab is hidden the observer must not touch playback
+           at all: browsers report slides as non-intersecting when the
+           page hides, and pausing on that would stop the video the
+           moment the user switches tabs. Owner order 2026-11-05: a
+           playing video keeps playing in another tab/app. When the tab
+           is visible again the observer re-fires with fresh ratios. */
+        else if (!document.hidden) { vids.forEach((x) => x.pause()); if (activeVid && en.target.contains(activeVid)) activeVid = null; }
       });
     }, { root: $("#feed"), threshold: [0, 0.6, 1] });
     $$("#feed .slide").forEach((s) => observer.observe(s));
@@ -2548,7 +2554,10 @@
   $("#sheetBackdrop").addEventListener("click", hideSheets);
   $$("[data-close-sheet]").forEach((b) => b.addEventListener("click", hideSheets));
 
-  document.addEventListener("visibilitychange", () => { if (document.hidden) pauseAllVideos(); });
+  /* No pause on tab switch: the owner wants a playing video to keep
+     playing when he opens another tab/app (2026-11-05). The old
+     visibilitychange handler that paused everything is removed on
+     purpose; in-app navigation still pauses via goto()/openStories(). */
 
   boot();
 })();
