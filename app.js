@@ -473,6 +473,11 @@
       entries.forEach((en) => {
         const vids = en.target.querySelectorAll("video");
         if (!vids.length) return;
+        /* Lazy video loading: a slide's file only starts downloading
+           when the slide comes into view — the feed no longer fires
+           off every download at once, so it opens fast and stays
+           fast when more people use it. */
+        vids.forEach((x) => { if (!x.getAttribute("src") && x.dataset.src) { try { x.src = x.dataset.src; } catch (e) {} } });
         if (en.intersectionRatio >= 0.6) {
           activeVid = en.target.querySelector("video.duet-main") || vids[0];
           vids.forEach((x) => { tryPlay(x); });
@@ -481,7 +486,7 @@
              while the file host's route catches up. */
           try { vids.forEach((x) => { x.preload = "auto"; }); } catch (e) {}
           const nextSlide = en.target.nextElementSibling;
-          if (nextSlide) { const nv = nextSlide.querySelector("video"); if (nv) { try { nv.preload = "auto"; nv.load(); } catch (e) {} } }
+          if (nextSlide) { const nv = nextSlide.querySelector("video.duet-main") || nextSlide.querySelector("video"); if (nv) { try { if (!nv.getAttribute("src") && nv.dataset.src) nv.src = nv.dataset.src; nv.preload = "auto"; nv.load(); } catch (e) {} } }
           setTimeout(() => { if (activeVid && activeVid.paused) en.target._showPlayState?.("pause"); }, 400);
           const id = en.target.dataset.id;
           if (id && !countedViews.has(id)) { countedViews.add(id); store.recordView(id, me ? me.id : null).catch(() => {}); }
@@ -542,8 +547,8 @@
     const filt = FILTER_CSS[v.filter] || "";
     const duet = v.duet_source ? v.duet_source : null;
     slide.innerHTML = `
-      ${duet ? `<div class="duet-wrap"><video class="duet-src" src="${esc(sessionUploads[duet.id] || duet.storage_path)}" loop playsinline preload="metadata"></video><video class="duet-main" src="${esc(src)}" ${v.thumbnail_path ? `poster="${esc(v.thumbnail_path)}"` : ""} loop playsinline preload="metadata" ${filt ? `style="filter:${filt}"` : ""}></video></div>`
-        : `<video src="${esc(src)}" ${v.thumbnail_path ? `poster="${esc(v.thumbnail_path)}"` : ""} loop playsinline preload="metadata" ${filt ? `style="filter:${filt}"` : ""}></video>`}
+      ${duet ? `<div class="duet-wrap"><video class="duet-src" data-src="${esc(sessionUploads[duet.id] || duet.storage_path)}" loop playsinline preload="metadata"></video><video class="duet-main" data-src="${esc(src)}" ${v.thumbnail_path ? `poster="${esc(v.thumbnail_path)}"` : ""} loop playsinline preload="metadata" ${filt ? `style="filter:${filt}"` : ""}></video></div>`
+        : `<video data-src="${esc(src)}" ${v.thumbnail_path ? `poster="${esc(v.thumbnail_path)}"` : ""} loop playsinline preload="metadata" ${filt ? `style="filter:${filt}"` : ""}></video>`}
       <div class="scrim"></div>
       <div class="play-state" aria-hidden="true"></div>
       <div class="rail">
