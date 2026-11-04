@@ -439,6 +439,17 @@ body{background:#07070C}
 .count-ring-bg{stroke:rgba(255,255,255,.25)}
 .count-ring-fg{stroke:#8B5CF6;stroke-linecap:round;stroke-dasharray:213.6;stroke-dashoffset:213.6}
 .count-label{font-weight:700;font-size:15px}
+.upload-progress{display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 0 2px}
+.up-ring-wrap{position:relative;width:56px;height:56px}
+.up-ring{width:56px;height:56px;transform:rotate(-90deg)}
+.up-ring circle{fill:none;stroke-width:6}
+.up-ring-bg{stroke:var(--line)}
+.up-ring-fg{stroke:#8B5CF6;stroke-linecap:round;stroke-dasharray:213.6;stroke-dashoffset:213.6;transition:stroke-dashoffset .2s}
+.upload-progress.done .up-ring-fg{stroke:var(--emerald)}
+.up-center{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px}
+.upload-progress.done .up-center{color:var(--emerald);font-size:22px}
+.up-label{font-size:13px;font-weight:600;color:var(--muted)}
+.upload-progress.done .up-label{color:var(--emerald)}
 .loc-line,.sound-line{font-size:12.5px;color:rgba(255,255,255,.85);margin-top:3px;display:flex;align-items:center;gap:5px;text-shadow:0 1px 5px rgba(0,0,0,.55)}
 .loc-line .ui-icon,.sound-line .ui-icon{width:14px;height:14px}
 .sound-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}

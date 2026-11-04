@@ -2020,13 +2020,22 @@
            * rejected for non-members). create-upload flips the file to
            * the full template server-side with the API key. */
           if (!fileId && m.file && storage && typeof storage.createFile === "function") {
-            const uploaded = await storage.createFile({ bucketId: MEDIA_BUCKET, fileId: ID.unique(), file: m.file, permissions: [readUser(me), updateUser(me), deleteUser(me)] });
+            let upFile = m.file;
+            /* The SDK only sends real File objects as file parts (a
+             * bare Blob is JSON-stringified to "{}" and the endpoint
+             * sees an empty file), so normalise, and refuse 0-byte
+             * files with a plain message instead of the endpoint's. */
+            if (typeof File !== "undefined" && !(upFile instanceof File)) { try { upFile = new File([upFile], (m.filename || "video.mp4"), { type: m.content_type || upFile.type || "video/mp4" }); } catch (e) {} }
+            if (!upFile || !upFile.size) throw new Error("This video file is empty (0 bytes) — please choose the video again.");
+            const upArgs = { bucketId: MEDIA_BUCKET, fileId: ID.unique(), file: upFile, permissions: [readUser(me), updateUser(me), deleteUser(me)] };
+            if (typeof m.onProgress === "function") upArgs.onProgress = (ev) => { try { m.onProgress(ev && typeof ev.progress === "number" ? ev.progress : 0); } catch (e) {} };
+            const uploaded = await storage.createFile(upArgs);
             fileId = (uploaded && (uploaded.$id || uploaded.id)) || null;
           }
           if (!thumbFileId && typeof thumbPath === "string" && thumbPath.indexOf("data:") === 0) {
             const blob = dataUrlToBlob(thumbPath);
-            if (blob && storage && typeof storage.createFile === "function") {
-              const uploadedThumb = await storage.createFile({ bucketId: MEDIA_BUCKET, fileId: ID.unique(), file: blob, permissions: [readUser(me), updateUser(me), deleteUser(me)] });
+            if (blob && blob.size > 0 && storage && typeof storage.createFile === "function") {
+              const uploadedThumb = await storage.createFile({ bucketId: MEDIA_BUCKET, fileId: ID.unique(), file: toFile(blob, "thumbnail.jpg"), permissions: [readUser(me), updateUser(me), deleteUser(me)] });
               thumbFileId = (uploadedThumb && (uploadedThumb.$id || uploadedThumb.id)) || null;
             }
           }
@@ -2037,6 +2046,7 @@
         }
         const payload = Object.assign({}, m);
         delete payload.file;
+        delete payload.onProgress;
         delete payload.fileId;
         delete payload.file_id;
         delete payload.thumbnailFileId;
@@ -2475,6 +2485,13 @@
       if (typeof Blob !== "undefined") return new Blob([bytes], { type: mime });
       return null;
     } catch (e) { return null; }
+  }
+
+  /* Blobs must go up as real Files: the SDK stringifies a bare Blob
+   * into "{}" and the storage endpoint reports an empty file. */
+  function toFile(blob, name) {
+    try { return new File([blob], name, { type: blob.type || "image/jpeg" }); }
+    catch (e) { return blob; }
   }
 
   function createStore(storage, backendClient) {

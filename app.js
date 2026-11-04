@@ -1153,6 +1153,7 @@
   function setMedia(f, opts) {
     const msg = $("#camMsg");
     if (!f.type || !String(f.type).startsWith("video/")) { if (msg) msg.textContent = "Please choose a video file."; toast("Please choose a video file."); return; }
+    if (!f.size) { if (msg) msg.textContent = "This video file is empty — please choose another video."; toast("This video file is empty — please choose another video."); return; }
     if (f.size > CFG.MAX_VIDEO_MB * 1024 * 1024) { toast("Too large — max " + CFG.MAX_VIDEO_MB + " MB."); return; }
     resetUploadStateForNewMedia();
     if (uploadBlobUrl) { try { URL.revokeObjectURL(uploadBlobUrl); } catch (e) {} }
@@ -1638,6 +1639,20 @@
       requestAnimationFrame(tick);
     });
   }
+  /* Upload progress ring (TikTok-style): small circle under the Post
+   * buttons showing the upload %, turning into a green tick at 100%. */
+  const UP_CIRC = 213.6;
+  function setUploadProgress(pct, done) {
+    const wrap = $("#uploadProgress"); if (!wrap) return;
+    const fg = $("#upRingFg"), pctEl = $("#upPct"), label = $("#upLabel");
+    wrap.classList.remove("hidden");
+    wrap.classList.toggle("done", !!done);
+    const p = Math.max(0, Math.min(100, Math.round(pct)));
+    if (fg) fg.style.strokeDashoffset = String(UP_CIRC * (1 - p / 100));
+    if (pctEl) pctEl.textContent = done ? "✓" : p + "%";
+    if (label) label.textContent = done ? "Uploaded" : "Uploading…";
+  }
+  function hideUploadProgress() { const wrap = $("#uploadProgress"); if (wrap) wrap.classList.add("hidden"); }
   function effectiveDuration() {
     const end = uploadTrimEnd || uploadDuration || 0;
     return Math.max(0, end - uploadTrimStart);
@@ -1695,7 +1710,7 @@
         // { video, upload_url: null } (no PUT step — upload_url is
         // always null, so the guard below never fires). The row is
         // created with the live status directly — no review queue.
-        created = await store.submitVideo(me.id, { ...meta, file: uploadFile, filename: uploadFile.name, content_type: uploadFile.type });
+        created = await store.submitVideo(me.id, { ...meta, file: uploadFile, filename: uploadFile.name, content_type: uploadFile.type, onProgress: opts && opts.onProgress });
         if (created && created.upload_url) {
           await fetch(created.upload_url, { method: "PUT", headers: { "Content-Type": uploadFile.type }, body: uploadFile });
         }
@@ -1729,8 +1744,20 @@
     if (!uploadFile || !uploadDuration) { toast("Choose or record a video first."); return; }
     if (effectiveDuration() <= 0 || effectiveDuration() > CFG.MAX_VIDEO_SECONDS + 0.5) { toast("Use Crop to keep a part within " + CFG.MAX_VIDEO_SECONDS + " seconds."); return; }
     await runPostCountdown();
-    const created = await doSubmit(false);
-    if (created) { showCreateScreen("home"); goto("home"); }
+    const ppv = $("#postPreviewVideo"); if (ppv) ppv.play().catch(() => {});
+    const pubBtn = $("#postPublishBtn"), drBtn = $("#postDraftBtn");
+    pubBtn.disabled = true; if (drBtn) drBtn.disabled = true;
+    setUploadProgress(0, false);
+    const created = await doSubmit(false, { onProgress: (p) => setUploadProgress(p * 0.9, false) });
+    if (created) {
+      setUploadProgress(100, true);
+      await new Promise((r) => setTimeout(r, 900));
+      hideUploadProgress();
+      showCreateScreen("home"); goto("home");
+    } else {
+      hideUploadProgress();
+    }
+    pubBtn.disabled = false; if (drBtn) drBtn.disabled = false;
   });
   async function renderMyVideos() {
     if (!me) return;

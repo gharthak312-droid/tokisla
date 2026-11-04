@@ -240,6 +240,13 @@
           <button id="postDraftBtn" class="btn btn-ghost" type="button">Drafts</button>
           <button id="postPublishBtn" class="btn btn-primary" type="button">Post</button>
         </div>
+        <div id="uploadProgress" class="upload-progress hidden" aria-live="polite">
+          <div class="up-ring-wrap">
+            <svg class="up-ring" viewBox="0 0 84 84" aria-hidden="true"><circle class="up-ring-bg" cx="42" cy="42" r="34"></circle><circle id="upRingFg" class="up-ring-fg" cx="42" cy="42" r="34"></circle></svg>
+            <div class="up-center"><span id="upPct">0%</span></div>
+          </div>
+          <div class="up-label" id="upLabel">Uploading…</div>
+        </div>
         <button id="postBackBtn" class="btn btn-ghost btn-block" style="margin-top:8px" type="button">Back to edit</button>
         <p class="tiny muted center">Posts go live immediately. Videos that break the rules (music, women, haram content) are removed when reported, and strikes apply.</p>
       </div>
