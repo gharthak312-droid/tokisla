@@ -84,7 +84,7 @@
       set_changepw: "Change password",
       set_share: "Share profile", set_private: "Private account", set_blocked: "Blocked accounts", set_guidelines: "Community Guidelines",
       set_rules: "Tokisla Rules", set_terms: "Terms of Service", set_privacy: "Privacy Policy", set_delete: "Delete my account", set_logout: "Log out",
-      set_display: "Display", set_language: "Language", disp_dark: "Dark", disp_light: "Light",
+      set_display: "Display", set_language: "Language", set_autoscroll: "Auto-scroll", disp_dark: "Dark", disp_light: "Light",
       allow_title: "Allow", allow_comments: "Who can comment", allow_mentions: "Who can mention you", allow_likes: "Who can like your videos",
       allow_downloads: "Who can download your videos", allow_followlist: "Who can view your follow lists" },
     ur: { nav_home: "ہوم", nav_friends: "دوست", nav_discover: "دریافت", nav_create: "بنائیں", nav_alerts: "اطلاعات", nav_profile: "پروفائل",
@@ -117,6 +117,14 @@
     let th = "light";
     try { th = localStorage.getItem("tokisla_theme") || "dark"; } catch (e) {}
     document.documentElement.dataset.theme = th;
+  }
+  /* Auto-scroll (owner order 2026-11-05): ON = when a video ends, the
+   * feed scrolls to the next video by itself; OFF (default) = the same
+   * video restarts from the beginning (loop). Persisted per device. */
+  function autoScrollOn() { try { return localStorage.getItem("tokisla_autoscroll") === "1"; } catch (e) { return false; } }
+  function setAutoScroll(on) {
+    try { localStorage.setItem("tokisla_autoscroll", on ? "1" : "0"); } catch (e) {}
+    $$("#feed video").forEach((v) => { try { v.loop = !on; } catch (e) {} });
   }
   const safeUrl = (u) => { const x = String(u || "").trim(); if (!x) return ""; return /^https?:\/\//i.test(x) ? x : "https://" + x.replace(/^\/+/, ""); };
   const prettyUrl = (u) => String(u || "").trim().replace(/^https?:\/\//i, "").replace(/\/$/, "");
@@ -636,8 +644,8 @@
     const filt = FILTER_CSS[v.filter] || "";
     const duet = v.duet_source ? v.duet_source : null;
     slide.innerHTML = `
-      ${duet ? `<div class="duet-wrap"><video class="duet-src" data-src="${esc(sessionUploads[duet.id] || duet.storage_path)}" loop playsinline preload="metadata"></video><video class="duet-main" data-src="${esc(src)}" ${v.thumbnail_path ? `poster="${esc(v.thumbnail_path)}"` : ""} loop playsinline preload="metadata" ${filt ? `style="filter:${filt}"` : ""}></video></div>`
-        : `<video data-src="${esc(src)}" ${v.thumbnail_path ? `poster="${esc(v.thumbnail_path)}"` : ""} loop playsinline preload="metadata" ${filt ? `style="filter:${filt}"` : ""}></video>`}
+      ${duet ? `<div class="duet-wrap"><video class="duet-src" data-src="${esc(sessionUploads[duet.id] || duet.storage_path)}" loop playsinline preload="metadata"></video><video class="duet-main" data-src="${esc(src)}" ${v.thumbnail_path ? `poster="${esc(v.thumbnail_path)}"` : ""} ${autoScrollOn() ? "" : "loop "}playsinline preload="metadata" ${filt ? `style="filter:${filt}"` : ""}></video></div>`
+        : `<video data-src="${esc(src)}" ${v.thumbnail_path ? `poster="${esc(v.thumbnail_path)}"` : ""} ${autoScrollOn() ? "" : "loop "}playsinline preload="metadata" ${filt ? `style="filter:${filt}"` : ""}></video>`}
       <div class="scrim"></div>
       <div class="play-state" aria-hidden="true"></div>
       <div class="rail">
@@ -680,6 +688,16 @@
     vid.addEventListener("play", () => showPlayState("hide"));
     vid.addEventListener("waiting", () => showPlayState("spin"));
     vid.addEventListener("playing", () => { if (!vid.paused) showPlayState("hide"); });
+    /* Auto-scroll: when this video ends and the setting is ON, move to
+       the next slide by itself; when OFF, the loop attribute restarts
+       this video, so ended never fires and nothing happens here. */
+    vid.addEventListener("ended", () => {
+      if (!autoScrollOn()) return;
+      if (vid !== activeVid || !atFeedRoot()) return;
+      const next = slide.nextElementSibling;
+      if (next && next.classList.contains("slide")) next.scrollIntoView({ behavior: "smooth", block: "start" });
+      else { try { vid.currentTime = 0; vid.play().catch(() => {}); } catch (e) {} }
+    });
     // Trim (Crop) from the edit screen: keep playback inside the trimmed
     // range when the video carries one.
     const trimStart = Number(v.trim_start_seconds) || 0;
@@ -2292,6 +2310,7 @@
       <button class="menu-row" id="stVerify"><span class="menu-ico" style="color:#38bdf8">${icon("badge")}</span><span style="flex:1;text-align:start">Apply for blue tick</span><span class="muted" style="font-size:13px">Rs 300/month</span></button>
       <button class="menu-row" id="stDisplay"><span class="menu-ico">${icon("sun")}</span><span style="flex:1;text-align:start">${t("set_display")}</span><span class="muted" style="font-size:13px">${themeNow}</span></button>
       <button class="menu-row" id="stLanguage"><span class="menu-ico">${icon("globe")}</span><span style="flex:1;text-align:start">${t("set_language")}</span><span class="muted" style="font-size:13px">${lang === "ur" ? "اردو" : "English"}</span></button>
+      <button class="menu-row" id="stAutoScroll"><span class="menu-ico">${icon("play")}</span><span style="flex:1;text-align:start">${t("set_autoscroll")}</span><span class="switch ${autoScrollOn() ? "on" : ""}"><span class="knob"></span></span></button>
       <div class="share-sec">Privacy</div>
       <button class="menu-row" id="stPrivate"><span class="menu-ico">${icon("lock")}</span><span style="flex:1;text-align:start">${t("set_private")}</span><span class="switch ${me && me.private_account ? "on" : ""}"><span class="knob"></span></span></button>
       <div class="share-sec">${t("allow_title")}</div>
@@ -2315,6 +2334,7 @@
     $("#stVerify").addEventListener("click", verifySheet);
     $("#stDisplay").addEventListener("click", displaySheet);
     $("#stLanguage").addEventListener("click", languageSheet);
+    $("#stAutoScroll").addEventListener("click", () => { setAutoScroll(!autoScrollOn()); settingsSheet(); });
     $("#stPrivate").addEventListener("click", async () => {
       const on = !(me && me.private_account);
       try { await store.setPrivateAccount(me.id, on); me.private_account = on; toast(on ? "Your account is now private." : "Your account is now public."); }
