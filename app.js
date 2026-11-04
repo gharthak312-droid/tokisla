@@ -565,16 +565,16 @@
       </div>
       <div class="progress"><i></i></div>`;
     const vid = slide.querySelector("video.duet-main") || slide.querySelector("video");
-    // Center play/pause/buffering indicator (TikTok-style): a pause icon
-    // stays visible while paused, a play icon flashes on resume, and a
-    // spinner shows while the video is buffering — so a pause is never
+    // Center play/pause/buffering indicator (TikTok-style): ONLY the
+    // triangle icon shows while paused (tap to play), and a spinner
+    // shows while the video is buffering — so a pause is never
     // mistaken for a network stall.
     const stateEl = slide.querySelector(".play-state");
     let spinTimer = null;
     const showPlayState = (kind) => {
       if (!stateEl) return;
       if (spinTimer) { clearTimeout(spinTimer); spinTimer = null; }
-      if (kind === "pause") { stateEl.innerHTML = icon("pause"); stateEl.classList.add("show"); stateEl.classList.remove("spin"); }
+      if (kind === "pause") { stateEl.innerHTML = icon("play"); stateEl.classList.add("show"); stateEl.classList.remove("spin"); }
       /* Buffering circle: only show it when the stall actually lasts —
          a 450ms grace period keeps micro-stalls from flashing the
          circle again and again on a slow route to the file host. */
