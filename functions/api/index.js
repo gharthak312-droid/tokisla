@@ -463,6 +463,16 @@ function safePublicFields(profile) {
 // where a router helper differs, the standalone logic is kept
 // inline below and the difference is noted in the comment.
 
+// Permission strings arrive as `read("user:<id>")` / `update("user:<id>")`
+// / `delete("user:<id>")` — never the bare `user:<id>`. Ownership checks
+// must match the quoted form (plus the bare legacy form), or every
+// permissioned file looks foreign. (2026-11-05: the bare comparison
+// rejected every real upload with "does not belong to the caller".)
+function permissionNamesUser(p, callerId) {
+  const s = String(p);
+  return s === `user:${callerId}` || s.includes(`"user:${callerId}"`);
+}
+
 // Delete an orphaned upload, but only when the file demonstrably
 // belongs to the caller (its permission list names them). Never
 // delete a file that belongs to someone else. Standalone
@@ -473,7 +483,7 @@ async function deleteOrphanIfOwned(storage, fileId, callerId, logFn) {
   try {
     const file = await storage.getFile({ bucketId: MEDIA_BUCKET, fileId });
     const permissions = file.$permissions || [];
-    const owned = permissions.some((p) => p === `user:${callerId}`);
+    const owned = permissions.some((p) => permissionNamesUser(p, callerId));
     if (permissions.length > 0 && !owned) {
       logFn(`create-upload: refusing to delete file ${fileId} (not owned by caller)`);
       return;
@@ -705,7 +715,7 @@ async function actionCreateUpload(ctx, body) {
     // Ownership: if the file carries permissions and none of them
     // names the caller, the file is not theirs to publish.
     const filePerms = file.$permissions || [];
-    if (filePerms.length > 0 && !filePerms.some((p) => p === `user:${callerId}`)) {
+    if (filePerms.length > 0 && !filePerms.some((p) => permissionNamesUser(p, callerId))) {
       throw forbidden("Uploaded file does not belong to the caller.");
     }
     if (thumbnailFileId) {

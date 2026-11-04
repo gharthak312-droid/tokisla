@@ -57,6 +57,23 @@
       <div id="authError" class="form-error hidden"></div>
       <button type="submit" id="authSubmit" class="btn btn-primary btn-block">Log in</button>
     </form>
+    <form id="resetForm" class="hidden">
+      <p class="muted" style="margin:0 0 12px">Set a new password for your account.</p>
+      <div class="field">
+        <label>New password</label>
+        <div class="input-wrap">
+          <input id="resetPassword" type="password" autocomplete="new-password" placeholder="••••••••" required minlength="8">
+        </div>
+      </div>
+      <div class="field">
+        <label>Confirm new password</label>
+        <div class="input-wrap">
+          <input id="resetPassword2" type="password" autocomplete="new-password" placeholder="••••••••" required minlength="8">
+        </div>
+      </div>
+      <div id="resetError" class="form-error hidden"></div>
+      <button type="submit" class="btn btn-primary btn-block">Save new password</button>
+    </form>
     <button id="forgotBtn" class="link-btn">Forgot password?</button>
     <button id="guestBtn" class="link-btn">Continue watching</button>
     <p class="tiny muted center">By continuing you agree to the Community Guidelines and Terms.</p>

@@ -26,6 +26,7 @@
   const store = window.TokislaStore.createStore(window.localStorage, backend);
 
   let me = null;           // my profile (null = guest)
+  let resetCreds = null;   // { userId, secret } from a password-reset email link, if present
   let feedKind = "foryou";
   let likedSet = new Set(), savedSet = new Set();
   let commentVideoId = null;
@@ -216,12 +217,32 @@
     me = await store.currentUser().catch(() => null);
     if (me) { await afterLogin(false); } else { me = null; likedSet = new Set(); savedSet = new Set(); enterApp(); } // guest-first: videos before account
     pushSentinel();
+    if (resetCreds) { showAuth(); showResetForm(); } // reset email link: new-password form first
     if (navigator.serviceWorker && navigator.serviceWorker.register) navigator.serviceWorker.register("sw.js").catch(() => {});
   }
   function showAuth() {
     $("#authScreen").classList.remove("hidden");
     $("#appShell").classList.add("hidden");
     $("#onboardingScreen").classList.add("hidden");
+  }
+  /* Password-reset completion: the reset email links back here with
+   * ?userId=...&secret=... — the send half (Forgot password) existed,
+   * but without this form the link landed on the page and nothing
+   * happened. showResetForm swaps the login form for the new-password
+   * form; showNormalAuth swaps back after a successful reset. */
+  function showResetForm() {
+    $$("#authScreen .tabs").forEach((el) => el.classList.add("hidden"));
+    $("#authForm").classList.add("hidden");
+    $("#forgotBtn").classList.add("hidden");
+    $("#guestBtn").classList.add("hidden");
+    $("#resetForm").classList.remove("hidden");
+  }
+  function showNormalAuth() {
+    $$("#authScreen .tabs").forEach((el) => el.classList.remove("hidden"));
+    $("#authForm").classList.remove("hidden");
+    $("#forgotBtn").classList.remove("hidden");
+    $("#guestBtn").classList.remove("hidden");
+    $("#resetForm").classList.add("hidden");
   }
   async function afterLogin(checkOnboarding) {
     pushSentinel();
@@ -331,6 +352,32 @@
     if (!email) { toast("Type your email above first, then tap Forgot password."); return; }
     if (!DEMO && backend && backend.account) { try { await backend.account.createRecovery({ email, url: window.location.origin + window.location.pathname }); toast("Password reset email sent."); } catch (ex) { toast(ex.message || "Password reset email sent."); } }
     else toast("Demo mode: password reset email would be sent to " + email + " in the live app.");
+  });
+  /* Reset-link credentials, read once at startup (live mode only). */
+  if (!DEMO && backend && backend.account) {
+    try {
+      const qp = new URLSearchParams(window.location.search);
+      const rUid = qp.get("userId"), rSec = qp.get("secret");
+      if (rUid && rSec) resetCreds = { userId: rUid, secret: rSec };
+    } catch (e) { /* no reset link: normal startup */ }
+  }
+  $("#resetForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const err = $("#resetError"); err.classList.add("hidden");
+    const p1 = $("#resetPassword").value, p2 = $("#resetPassword2").value;
+    if (p1.length < 8) { err.textContent = "Password must be at least 8 characters."; err.classList.remove("hidden"); return; }
+    if (p1 !== p2) { err.textContent = "Passwords do not match."; err.classList.remove("hidden"); return; }
+    if (!resetCreds || !backend || !backend.account) { err.textContent = "This reset link is incomplete. Send a new one with Forgot password."; err.classList.remove("hidden"); return; }
+    try {
+      await backend.account.updateRecovery({ userId: resetCreds.userId, secret: resetCreds.secret, password: p1 });
+      resetCreds = null;
+      try { history.replaceState(null, "", window.location.pathname); } catch (e2) { /* URL cleanup is cosmetic */ }
+      toast("Password updated — log in with your new password.");
+      showNormalAuth();
+    } catch (ex) {
+      err.textContent = (ex && ex.message) || "Reset failed — the link may have expired. Send a new one with Forgot password.";
+      err.classList.remove("hidden");
+    }
   });
   function continueAsGuest() { me = null; likedSet = new Set(); savedSet = new Set(); enterApp(); }
   $("#guestBtn").addEventListener("click", continueAsGuest);
