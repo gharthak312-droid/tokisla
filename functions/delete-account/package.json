@@ -1,0 +1,1 @@
+{"dependencies":{"node-appwrite":"31.1.0"},"description":"Tokisla account deletion: explicit file and document cascade plus Auth-user deletion for Appwrite Cloud Functions.","engines":{"node":">=20"},"main":"index.js","name":"tokisla-delete-account","private":true,"type":"module","version":"1.0.0"}

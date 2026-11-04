@@ -1,0 +1,28 @@
+# Secrets — kabhi commit nahi karne
+.env
+*.env.local
+supabase/.env
+android/key.properties
+*.jks
+*.keystore
+google-services.json
+
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+pubspec.lock
+
+# Android / IDE
+.gradle/
+local.properties
+.idea/
+*.iml
+.vscode/
+
+# OS / misc
+.DS_Store
+Thumbs.db
+node_modules/

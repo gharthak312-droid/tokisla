@@ -7,9 +7,22 @@
   const CATS = window.TokislaStore.CATEGORIES;
   const DEMO = window.TokislaStore.DEMO;
 
-  let sb = null;
-  if (!DEMO && window.supabase) sb = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY);
-  const store = window.TokislaStore.createStore(window.localStorage, sb);
+  let backend = null;
+  if (!DEMO && window.Appwrite) {
+    const client = new window.Appwrite.Client().setEndpoint(CFG.APPWRITE_ENDPOINT).setProject(CFG.APPWRITE_PROJECT_ID);
+    backend = {
+      client,
+      account: new window.Appwrite.Account(client),
+      tables: new window.Appwrite.TablesDB(client),
+      storage: new window.Appwrite.Storage(client),
+      functions: new window.Appwrite.Functions(client),
+      Query: window.Appwrite.Query,
+      Permission: window.Appwrite.Permission,
+      Role: window.Appwrite.Role,
+      ID: window.Appwrite.ID,
+    };
+  }
+  const store = window.TokislaStore.createStore(window.localStorage, backend);
 
   let me = null;           // my profile (null = guest)
   let feedKind = "foryou";
@@ -198,19 +211,50 @@
     $("#authSubmit").textContent = m === "login" ? "Log in" : "Create account";
     $("#authPassword").setAttribute("autocomplete", m === "login" ? "current-password" : "new-password");
     $("#authError").classList.add("hidden");
+    refreshAuthTicks();
   }
   $("#tabLogin").addEventListener("click", () => setAuthMode("login"));
   $("#tabSignup").addEventListener("click", () => setAuthMode("signup"));
+  /* Green validation ticks: username (format + availability result),
+   * email (format), password (8+ chars). The username tick only ever
+   * shows when the availability check positively returned available —
+   * never while checking, and never when the check failed. */
+  let usernameCheckState = "idle"; // idle | checking | available | taken | unknown
+  const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+  function setTick(id, on) { const el = $(id); if (el) el.classList.toggle("hidden", !on); }
+  function refreshAuthTicks() {
+    setTick("#emailTick", emailRe.test($("#authEmail").value.trim()));
+    setTick("#passwordTick", $("#authPassword").value.length >= 8);
+    setTick("#usernameTick", authMode === "signup" && usernameCheckState === "available");
+  }
+  ["#usernameTick", "#emailTick", "#passwordTick"].forEach((id) => { const el = $(id); if (el) el.innerHTML = icon("check"); });
+  $("#authEmail").addEventListener("input", refreshAuthTicks);
+  $("#authPassword").addEventListener("input", refreshAuthTicks);
   let userCheckTimer = null;
   $("#authUsername").addEventListener("input", (e) => {
     clearTimeout(userCheckTimer);
     const v = e.target.value.trim().toLowerCase();
     const hint = $("#usernameHint");
+    usernameCheckState = "idle";
+    setTick("#usernameTick", false);
     if (v.length < 3) { hint.textContent = ""; return; }
+    hint.textContent = "Checking…";
+    hint.style.color = "var(--muted)";
+    usernameCheckState = "checking";
     userCheckTimer = setTimeout(async () => {
-      const okAvail = await store.usernameAvailable(v).catch(() => false);
-      hint.textContent = okAvail ? "Available" : "Taken or invalid (3-24 chars: a-z 0-9 . _)";
-      hint.style.color = okAvail ? "var(--emerald)" : "var(--error)";
+      try {
+        const okAvail = await store.usernameAvailable(v);
+        if ($("#authUsername").value.trim().toLowerCase() !== v) return; // stale: user typed on
+        usernameCheckState = okAvail ? "available" : "taken";
+        hint.textContent = okAvail ? "Available" : "Taken or invalid (3-24 chars: a-z 0-9 . _)";
+        hint.style.color = okAvail ? "var(--emerald)" : "var(--error)";
+      } catch (err) {
+        if ($("#authUsername").value.trim().toLowerCase() !== v) return; // stale: user typed on
+        usernameCheckState = "unknown";
+        hint.textContent = "Couldn't check username right now";
+        hint.style.color = "var(--muted)";
+      }
+      refreshAuthTicks();
     }, 350);
   });
   $("#authForm").addEventListener("submit", async (e) => {
@@ -227,7 +271,7 @@
   $("#forgotBtn").addEventListener("click", async () => {
     const email = $("#authEmail").value.trim();
     if (!email) { toast("Type your email above first, then tap Forgot password."); return; }
-    if (!DEMO && sb) { const { error } = await sb.auth.resetPasswordForEmail(email); toast(error ? error.message : "Password reset email sent."); }
+    if (!DEMO && backend && backend.account) { try { await backend.account.createRecovery({ email, url: window.location.origin + window.location.pathname }); toast("Password reset email sent."); } catch (ex) { toast(ex.message || "Password reset email sent."); } }
     else toast("Demo mode: password reset email would be sent to " + email + " in the live app.");
   });
   function continueAsGuest() { me = null; likedSet = new Set(); savedSet = new Set(); enterApp(); }
@@ -264,7 +308,12 @@
     if (view !== "home") pauseAllVideos();
     if (view === "home") loadFeed();
     if (view === "discover") renderDiscover();
-    if (view === "create") renderMyVideos();
+    if (view === "create") {
+      renderMyVideos();
+      // + tap opens the camera screen (or back to the edit/post step
+      // when a video is already being made).
+      if (typeof showCreateScreen === "function") showCreateScreen(uploadFile ? "edit" : "camera");
+    } else if (typeof stopCamera === "function") { stopCamera(); if (typeof stopSoundPreview === "function") stopSoundPreview(); }
     if (view === "notifications") renderNotifications();
     if (view === "messages") renderConversations();
     if (view === "friends") renderFriends();
@@ -432,9 +481,19 @@
         ${v.poll ? `<div class="poll-box" data-poll></div>` : ""}
         <div class="user" data-act="profile">${esc(v.display_name || v.username)} ${v.verified ? `<span class="verified">${icon("badge")}</span>` : ""}</div>
         <div class="cap">${linkify(v.caption)}</div>
+        ${v.location ? `<div class="loc-line">${icon("globe")} ${esc(v.location)}</div>` : ""}
+        ${v.sound_title ? `<div class="sound-line">${icon("play")} Sound: ${esc(v.sound_title)}</div>` : ""}
       </div>
       <div class="progress"><i></i></div>`;
     const vid = slide.querySelector("video.duet-main") || slide.querySelector("video");
+    // Trim (Crop) from the edit screen: keep playback inside the trimmed
+    // range when the video carries one.
+    const trimStart = Number(v.trim_start_seconds) || 0;
+    const trimEnd = Number(v.trim_end_seconds) || 0;
+    if (trimEnd > trimStart) {
+      vid.addEventListener("loadedmetadata", () => { try { if (vid.currentTime < trimStart || vid.currentTime >= trimEnd) vid.currentTime = trimStart; } catch (e) {} });
+      vid.addEventListener("timeupdate", () => { try { if (vid.currentTime >= trimEnd) vid.currentTime = trimStart; } catch (e) {} });
+    }
     const duetVid = slide.querySelector("video.duet-src");
     if (duetVid) {
       vid.addEventListener("play", () => { duetVid.play().catch(() => {}); });
@@ -730,7 +789,7 @@
     $$("#actionSheetBody [data-reason]").forEach((b) => b.addEventListener("click", async () => {
       hideSheets(); if (needLogin()) return;
       await store.report(me.id, targetType, targetId, b.dataset.reason);
-      toast("Thank you — our moderation team will review this.");
+      toast("Thank you — reported videos are removed if they break the rules, and strikes apply.");
     }));
   }
 
@@ -841,26 +900,51 @@
     if (!users.length && !videos.length && !onlyCat) box.innerHTML = '<p class="muted center" style="padding:14px">Search for creators and videos, or pick a category.</p>';
   }
 
-  /* ------------------------------------------------------------ create / upload */
-  let uploadFile = null, uploadDuration = 0, uploadThumb = "";
+  /* ------------------------------------------------------------ create / upload
+     Camera -> edit -> post (TikTok-style). Posts go live immediately:
+     the store creates non-draft videos with the live status
+     ("approved") directly — no review queue, no pending state.
+     No categories anywhere in this flow. Sounds: original audio by
+     default, or a library sound (sound effects / naat / taqreer /
+     Islamic) chosen from the catalog — never music. */
+  let uploadFile = null, uploadBlobUrl = "", uploadDuration = 0, uploadThumb = "";
   let uploadFilter = "normal", duetTarget = null, replyTarget = null;
+  let uploadText = "", uploadTrimStart = 0, uploadTrimEnd = 0;
+  let uploadSound = null; // {id,title,category,src} or null = original audio
+  let uploadLocation = "", uploadLink = "", uploadDisclosure = false;
+  let uploadVisibility = "public", uploadPoll = null, createScreen = "camera";
   const FILTERS = [["normal", "Normal"], ["warm", "Warm"], ["cool", "Cool"], ["mono", "Mono"], ["vivid", "Vivid"]];
+  const SOUND_CATS = (window.TokislaStore.SOUND_CATEGORIES || [["sound-effects", "Sound Effects"], ["naat", "Naat"], ["taqreer", "Taqreer"], ["islamic", "Islamic"]]);
+  const SOUND_CAT_LABEL = (slug) => { const f = SOUND_CATS.find(([s]) => s === slug); return f ? f[1] : slug; };
+
+  function setFilter(fid) {
+    if (!FILTERS.some(([id]) => id === fid)) fid = "normal";
+    uploadFilter = fid;
+    $$("#camFilterChips .fchip, #editFilterChips .fchip").forEach((x) => x.classList.toggle("active", x.dataset.filter === fid));
+    const css = FILTER_CSS[fid] || "";
+    const cv = $("#camVideo"); if (cv) cv.style.filter = css;
+    const pv = $("#editPreview"); if (pv) pv.style.filter = css;
+  }
   FILTERS.forEach(([fid, fname]) => {
-    const b = document.createElement("button");
-    b.className = "fchip" + (fid === "normal" ? " active" : ""); b.textContent = fname; b.type = "button";
-    b.addEventListener("click", () => {
-      uploadFilter = fid;
-      $$("#filterChips .fchip").forEach((x) => x.classList.remove("active")); b.classList.add("active");
-      const pv = $("#uploadPreview"); if (pv) pv.style.filter = FILTER_CSS[fid] || "";
+    ["#camFilterChips", "#editFilterChips"].forEach((sel) => {
+      const host = $(sel); if (!host) return;
+      const b = document.createElement("button");
+      b.className = "fchip" + (fid === "normal" ? " active" : ""); b.textContent = fname; b.type = "button"; b.dataset.filter = fid;
+      b.addEventListener("click", () => setFilter(fid));
+      host.appendChild(b);
     });
-    $("#filterChips").appendChild(b);
   });
-  $("#pollToggle").addEventListener("change", (e) => $("#pollFields").classList.toggle("hidden", !e.target.checked));
-  function readPoll() {
-    if (!$("#pollToggle").checked) return null;
-    const q = $("#pollQ").value.trim(), a = $("#pollA").value.trim(), b = $("#pollB").value.trim();
-    if (!q || !a || !b) return "invalid";
-    return { question: q, options: [a, b] };
+
+  function showCreateScreen(name) {
+    createScreen = name;
+    ["camera", "edit", "post", "home"].forEach((n) => {
+      const el = n === "camera" ? $("#createCamera") : n === "edit" ? $("#createEdit") : n === "post" ? $("#createPost") : $("#createHome");
+      if (el) el.classList.toggle("hidden", n !== name);
+    });
+    if (name === "camera") startCamera();
+    else stopCamera();
+    if (name === "home") renderMyVideos();
+    if (name === "post") syncPostScreen();
   }
   function updateCreateContext() {
     const box = $("#createContext"), txt = $("#createContextText");
@@ -871,124 +955,636 @@
   $("#createContextClear").addEventListener("click", () => { duetTarget = null; replyTarget = null; updateCreateContext(); });
   function startDuet(v) { duetTarget = v; replyTarget = null; updateCreateContext(); goto("create"); }
   function startVideoReply(c) { replyTarget = { commentId: c.id, username: c.username, body: c.body }; duetTarget = null; updateCreateContext(); goto("create"); }
-  const catSelect = $("#uploadCategory");
-  CATS.forEach((c) => { const o = document.createElement("option"); o.value = c.id; o.textContent = c.name; catSelect.appendChild(o); });
+
+  /* ---- camera ---- */
+  let camStream = null, mediaRecorder = null, recChunks = [], recTimer = null, recStartedAt = 0, camFacing = "user";
+  function stopCamera() {
+    if (recTimer) { clearInterval(recTimer); recTimer = null; }
+    if (mediaRecorder && mediaRecorder.state !== "inactive") { try { mediaRecorder.stop(); } catch (e) {} }
+    mediaRecorder = null;
+    $("#camRecordBtn").classList.remove("recording");
+    if (camStream) { camStream.getTracks().forEach((tr) => { try { tr.stop(); } catch (e) {} }); camStream = null; }
+    const cv = $("#camVideo"); if (cv) cv.srcObject = null;
+  }
+  async function startCamera() {
+    stopCamera();
+    const msg = $("#camMsg"); if (msg) msg.textContent = "";
+    const unavail = $("#camUnavailable"); if (unavail) unavail.classList.add("hidden");
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      if (unavail) unavail.classList.remove("hidden");
+      if (msg) msg.textContent = "Camera is not available here — use Gallery below.";
+      return;
+    }
+    try {
+      camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: camFacing }, audio: true });
+      const cv = $("#camVideo");
+      cv.srcObject = camStream;
+      cv.style.filter = FILTER_CSS[uploadFilter] || "";
+    } catch (e) {
+      // Never hard-fail: the gallery picker must still work.
+      if (unavail) unavail.classList.remove("hidden");
+      if (msg) msg.textContent = "Camera unavailable or permission denied — you can still pick a video from your gallery.";
+    }
+  }
+  function camTick() {
+    const el = (Date.now() - recStartedAt) / 1000;
+    $("#camTimer").textContent = el.toFixed(1) + "s / " + CFG.MAX_VIDEO_SECONDS + "s";
+    $("#camProgress").style.width = Math.min(100, el / CFG.MAX_VIDEO_SECONDS * 100) + "%";
+    if (el >= CFG.MAX_VIDEO_SECONDS) stopRecording();
+  }
+  function startRecording() {
+    if (!camStream) { toast("Camera is not available — use Gallery instead."); return; }
+    if (typeof MediaRecorder === "undefined") { toast("Recording is not supported on this device — use Gallery instead."); return; }
+    const mime = ["video/webm;codecs=vp9,opus", "video/webm", "video/mp4"].find((m) => { try { return MediaRecorder.isTypeSupported(m); } catch (e) { return false; } }) || "";
+    try {
+      mediaRecorder = mime ? new MediaRecorder(camStream, { mimeType: mime }) : new MediaRecorder(camStream);
+    } catch (e) { toast("Could not start recording — use Gallery instead."); return; }
+    recChunks = [];
+    const mr = mediaRecorder;
+    mediaRecorder.ondataavailable = (ev) => { if (ev.data && ev.data.size) recChunks.push(ev.data); };
+    mediaRecorder.onstop = () => {
+      const type = (mr && mr.mimeType) || "video/webm";
+      const blob = new Blob(recChunks, { type });
+      const file = toUploadFile(blob, "tokisla-recording." + (type.indexOf("mp4") !== -1 ? "mp4" : "webm"), type);
+      setMedia(file, { recorded: true });
+    };
+    mediaRecorder.start(250);
+    recStartedAt = Date.now();
+    $("#camRecordBtn").classList.add("recording");
+    $("#camTimer").textContent = "0.0s / " + CFG.MAX_VIDEO_SECONDS + "s";
+    recTimer = setInterval(camTick, 100);
+  }
+  function stopRecording() {
+    if (recTimer) { clearInterval(recTimer); recTimer = null; }
+    $("#camRecordBtn").classList.remove("recording");
+    if (mediaRecorder && mediaRecorder.state !== "inactive") { try { mediaRecorder.stop(); } catch (e) {} }
+  }
+  function toUploadFile(blob, name, type) {
+    try { return new File([blob], name, { type: type || blob.type || "video/webm" }); }
+    catch (e) { const f = blob; f.name = name; return f; }
+  }
+  $("#camRecordBtn").addEventListener("click", () => {
+    if (mediaRecorder && mediaRecorder.state === "recording") stopRecording();
+    else startRecording();
+  });
+  $("#camGalleryBtn").addEventListener("click", () => $("#videoFile").click());
+  $("#homeGalleryBtn").addEventListener("click", () => $("#videoFile").click());
+  $("#homeRecordBtn").addEventListener("click", () => { if (needLogin()) return; showCreateScreen("camera"); });
+  $("#camBackBtn").addEventListener("click", () => showCreateScreen("home"));
+  $("#camMyVideosBtn").addEventListener("click", () => showCreateScreen("home"));
+  $("#camFlipBtn").addEventListener("click", async () => {
+    camFacing = camFacing === "user" ? "environment" : "user";
+    await startCamera();
+  });
   /* profile photo: the + badge on the profile picture opens the gallery */
   $("#avatarFile").addEventListener("change", async (e) => {
     const f = e.target.files && e.target.files[0];
     e.target.value = "";
     if (f) await applyAvatarFile(f);
   });
-  $("#pickVideoBtn").addEventListener("click", () => $("#videoFile").click());
+
+  /* ---- media intake (gallery pick or camera recording) ---- */
   $("#videoFile").addEventListener("change", (e) => {
-    const f = e.target.files[0]; if (!f) return;
-    uploadFile = f; uploadDuration = 0; uploadThumb = "";
-    const msg = $("#uploadMsg");
-    if (!f.type.startsWith("video/")) { msg.textContent = "Please choose a video file."; msg.style.color = "var(--error)"; uploadFile = null; return; }
-    if (f.size > CFG.MAX_VIDEO_MB * 1024 * 1024) { msg.textContent = `Too large — max ${CFG.MAX_VIDEO_MB} MB.`; msg.style.color = "var(--error)"; uploadFile = null; return; }
-    const pv = $("#uploadPreview");
-    pv.src = URL.createObjectURL(f); pv.classList.remove("hidden");
+    const f = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!f) return;
+    if (needLogin()) return;
+    setMedia(f, {});
+  });
+  function resetUploadStateForNewMedia() {
+    uploadThumb = ""; uploadText = ""; uploadSound = null;
+    uploadLocation = ""; uploadLink = ""; uploadDisclosure = false;
+    uploadVisibility = "public"; uploadPoll = null;
+    uploadTrimStart = 0; uploadTrimEnd = 0;
+    const ti = $("#editTextInput"); if (ti) ti.value = "";
+    const pc = $("#postPolicyCheck"); if (pc) pc.checked = false;
+    const cap = $("#postCaption"); if (cap) cap.value = "";
+    updateSoundLabel();
+  }
+  function setMedia(f, opts) {
+    const msg = $("#camMsg");
+    if (!f.type || !String(f.type).startsWith("video/")) { if (msg) msg.textContent = "Please choose a video file."; toast("Please choose a video file."); return; }
+    if (f.size > CFG.MAX_VIDEO_MB * 1024 * 1024) { toast("Too large — max " + CFG.MAX_VIDEO_MB + " MB."); return; }
+    resetUploadStateForNewMedia();
+    if (uploadBlobUrl) { try { URL.revokeObjectURL(uploadBlobUrl); } catch (e) {} }
+    uploadFile = f; uploadDuration = 0;
+    uploadBlobUrl = URL.createObjectURL(f);
+    const pv = $("#editPreview");
+    pv.style.filter = FILTER_CSS[uploadFilter] || "";
+    pv.src = uploadBlobUrl;
     pv.onloadedmetadata = () => {
       uploadDuration = pv.duration || 0;
-      $("#uploadMeta").textContent = `${f.name} · ${uploadDuration.toFixed(1)}s · ${(f.size / 1048576).toFixed(1)} MB`;
+      uploadTrimStart = 0;
+      uploadTrimEnd = Math.min(uploadDuration, CFG.MAX_VIDEO_SECONDS);
       if (uploadDuration > CFG.MAX_VIDEO_SECONDS + 0.5) {
-        msg.textContent = `This video is ${uploadDuration.toFixed(1)}s — Tokisla allows max ${CFG.MAX_VIDEO_SECONDS} seconds. Please trim it.`;
-        msg.style.color = "var(--error)";
-      } else { msg.textContent = "Duration OK"; msg.style.color = "var(--emerald)"; }
-      validatePublish();
-      // capture a thumbnail frame
-      try {
-        pv.currentTime = Math.min(1, uploadDuration / 2);
-        pv.onseeked = () => {
+        $("#editMeta").textContent = f.name + " · " + uploadDuration.toFixed(1) + "s — trimmed to the first " + CFG.MAX_VIDEO_SECONDS + "s; adjust Crop if you want a different part.";
+      } else {
+        $("#editMeta").textContent = f.name + " · " + uploadDuration.toFixed(1) + "s · " + (f.size / 1048576).toFixed(1) + " MB";
+      }
+      syncTrimUI();
+      captureThumb();
+    };
+    showCreateScreen("edit");
+  }
+  function captureThumb() {
+    // Keep the existing thumbnail behaviour: a frame from the video,
+    // drawn with the chosen filter, stored as a data URL.
+    try {
+      const pv = $("#editPreview");
+      const seekTo = Math.min(1, (uploadDuration || 2) / 2);
+      const onSeek = () => {
+        try {
           const cv = document.createElement("canvas");
           cv.width = 270; cv.height = 480;
           const cx2 = cv.getContext("2d");
           try { cx2.filter = FILTER_CSS[uploadFilter] || ""; } catch (err) {}
           cx2.drawImage(pv, 0, 0, cv.width, cv.height);
           uploadThumb = cv.toDataURL("image/jpeg", 0.6);
-          pv.onseeked = null;
-        };
-      } catch (err) { /* thumbnail is optional */ }
-    };
-  });
-  function validatePublish() {
-    const okFile = !!uploadFile && uploadDuration > 0 && uploadDuration <= CFG.MAX_VIDEO_SECONDS + 0.5;
-    $("#publishBtn").disabled = !(okFile && $("#policyCheck").checked);
-    $("#draftBtn").disabled = !okFile;
-  }
-  $("#policyCheck").addEventListener("change", validatePublish);
-  async function doSubmit(isDraft) {
-    if (needLogin()) return;
-    const pollVal = readPoll();
-    if (pollVal === "invalid") { $("#uploadMsg").textContent = "Poll needs a question and two options — or switch the poll off."; $("#uploadMsg").style.color = "var(--error)"; return; }
-    const wrap = $("#uploadProgressWrap"), bar = $("#uploadProgress");
-    wrap.classList.remove("hidden");
-    let p = 0;
-    const iv = setInterval(() => { p = Math.min(92, p + 9); bar.style.width = p + "%"; }, 120);
-    try {
-      const meta = {
-        caption: $("#uploadCaption").value, category_ids: [Number(catSelect.value)],
-        visibility: $("#uploadVisibility").value, duration_seconds: Math.round(uploadDuration * 100) / 100,
-        size_bytes: uploadFile.size, storage_path: "", thumbnail_path: uploadThumb || "",
-        filter: uploadFilter, poll: pollVal,
-        duet_of: duetTarget ? duetTarget.id : null,
-        reply_comment_id: replyTarget ? replyTarget.commentId : null,
-        is_draft: !!isDraft,
+        } catch (err) { /* thumbnail is optional */ }
+        pv.removeEventListener("seeked", onSeek);
+        try { pv.currentTime = uploadTrimStart || 0; } catch (e) {}
       };
+      pv.addEventListener("seeked", onSeek);
+      pv.currentTime = seekTo;
+    } catch (err) { /* thumbnail is optional */ }
+  }
+
+  /* ---- edit screen ---- */
+  function syncTrimUI() {
+    const d = uploadDuration || CFG.MAX_VIDEO_SECONDS;
+    const s = $("#trimStart"), e = $("#trimEnd");
+    if (s) { s.max = d; s.value = uploadTrimStart; }
+    if (e) { e.max = d; e.value = uploadTrimEnd || d; }
+    const lab = $("#trimLabel");
+    if (lab) lab.textContent = Number(uploadTrimStart).toFixed(1) + "s – " + Number(uploadTrimEnd || d).toFixed(1) + "s (" + Math.max(0, (uploadTrimEnd || d) - uploadTrimStart).toFixed(1) + "s kept, max " + CFG.MAX_VIDEO_SECONDS + "s)";
+    const pv = $("#editPreview");
+    if (pv) {
+      pv.onloadedmetadata = null;
+      pv.ontimeupdate = trimLoop;
+    }
+  }
+  function trimLoop() {
+    const pv = $("#editPreview");
+    const end = uploadTrimEnd || uploadDuration || 0;
+    if (end > uploadTrimStart && pv.currentTime >= end) { try { pv.currentTime = uploadTrimStart; } catch (e) {} }
+  }
+  $("#trimStart").addEventListener("input", (e) => {
+    uploadTrimStart = Math.min(Number(e.target.value), (uploadTrimEnd || uploadDuration) - 0.5);
+    if (uploadTrimStart < 0) uploadTrimStart = 0;
+    syncTrimUI();
+  });
+  $("#trimEnd").addEventListener("input", (e) => {
+    uploadTrimEnd = Math.max(Number(e.target.value), uploadTrimStart + 0.5);
+    if (uploadTrimEnd > (uploadDuration || CFG.MAX_VIDEO_SECONDS)) uploadTrimEnd = uploadDuration || CFG.MAX_VIDEO_SECONDS;
+    syncTrimUI();
+  });
+  $("#editTextInput").addEventListener("input", (e) => {
+    uploadText = e.target.value;
+    const ov = $("#editTextOverlay");
+    ov.textContent = uploadText;
+    ov.classList.toggle("hidden", !uploadText.trim());
+  });
+  function showEditPanel(which) {
+    ["Text", "Filter", "Crop"].forEach((n) => $("#tool" + n + "Panel").classList.toggle("hidden", n !== which));
+    $$(".edit-tool").forEach((b) => b.classList.remove("active"));
+    const map = { Text: "#toolTextBtn", Filter: "#toolFilterBtn", Crop: "#toolCropBtn" };
+    if (which && $(map[which])) $(map[which]).classList.add("active");
+  }
+  $("#toolTextBtn").addEventListener("click", () => showEditPanel("Text"));
+  $("#toolFilterBtn").addEventListener("click", () => showEditPanel("Filter"));
+  $("#toolCropBtn").addEventListener("click", () => showEditPanel("Crop"));
+  $("#editBackBtn").addEventListener("click", () => { pauseEditMedia(); showCreateScreen("camera"); });
+  $("#editNextBtn").addEventListener("click", () => { pauseEditMedia(); showCreateScreen("post"); });
+  function pauseEditMedia() {
+    const pv = $("#editPreview"); if (pv) { try { pv.pause(); } catch (e) {} }
+    stopSoundPreview();
+  }
+  function updateSoundLabel() {
+    $("#editSoundLabel").textContent = uploadSound ? "Sound: " + uploadSound.title : "Add sound";
+    // X (clear) control: visible only while a library sound is attached.
+    // Tapping it detaches the sound and restores original audio.
+    const clearBtn = $("#editSoundClear");
+    if (clearBtn) clearBtn.classList.toggle("hidden", !uploadSound);
+  }
+
+  /* ---- sounds library ---- */
+  const SOUND_TABS = [["original", "Original"]].concat(SOUND_CATS);
+  let soundPreview = null, soundTab = "original", soundQuery = "";
+  function stopSoundPreview() {
+    if (soundPreview) { try { soundPreview.pause(); } catch (e) {} soundPreview = null; }
+  }
+  function openSoundLibrary() {
+    if (needLogin()) return;
+    openActionSheet("Add sound", `
+      <p class="muted" style="margin-top:0">Original audio is the default. Sounds in the library are added by the owner and by users, and go live at once — sound effects, naats, taqreers and other Islamic audio only. No music is allowed on Tokisla. Sounds that break the rules are removed when reported, and strikes apply.</p>
+      <button class="btn btn-primary btn-block" id="sndAddBtn" type="button" style="margin-bottom:8px">Add your own sound</button>
+      <button class="menu-row" id="sndOriginal"><span class="menu-ico">${icon("play")}</span><span style="flex:1;text-align:start">Original audio — your video's own sound</span><span class="muted" style="font-size:13px">${uploadSound ? "" : "Selected"}</span></button>
+      <div class="sound-tabs" id="sndTabs"></div>
+      <div class="field"><input id="sndSearch" type="search" placeholder="Search sounds..." value="${esc(soundQuery)}"></div>
+      <div id="sndList"></div>`);
+    const tabsEl = $("#sndTabs");
+    SOUND_TABS.forEach(([slug, label]) => {
+      const b = document.createElement("button");
+      b.className = "sound-tab" + (slug === soundTab ? " active" : ""); b.textContent = label; b.type = "button";
+      b.addEventListener("click", () => { soundTab = slug; stopSoundPreview(); openSoundLibrary(); });
+      tabsEl.appendChild(b);
+    });
+    $("#sndAddBtn").addEventListener("click", openAddSoundForm);
+    $("#sndOriginal").addEventListener("click", () => { uploadSound = null; updateSoundLabel(); stopSoundPreview(); hideSheets(); toast("Original audio selected."); });
+    $("#sndSearch").addEventListener("input", (e) => { soundQuery = e.target.value; renderSoundList(); });
+    renderSoundList();
+  }
+  function soundSubtitle(s) {
+    const dur = s.duration_seconds ? " · " + Number(s.duration_seconds).toFixed(0) + "s" : "";
+    if (s.source_type === "original" || s.category === "original") {
+      const by = s.creator_username ? " · by @" + s.creator_username : "";
+      return "Original sound" + by + dur;
+    }
+    return esc(SOUND_CAT_LABEL(s.category)) + dur + (s.source ? " · " + esc(s.source) : "");
+  }
+  async function renderSoundList() {
+    const box = $("#sndList"); if (!box) return;
+    box.innerHTML = '<p class="muted tiny" style="padding:8px 2px">Loading sounds...</p>';
+    const all = await store.listSounds().catch(() => []);
+    const q = soundQuery.trim().toLowerCase();
+    const matches = (s) => !q || String(s.title || "").toLowerCase().includes(q)
+      || String(s.creator_username || "").toLowerCase().includes(q);
+    let list;
+    if (soundTab === "original") {
+      // Originals newest first. No use count is shown: it is not
+      // trivially computable from the loaded videos here, and a count
+      // must never be faked.
+      list = all.filter((s) => (s.source_type === "original" || s.category === "original") && matches(s))
+        .sort((a, b) => {
+          const ka = a.created_at || "", kb = b.created_at || "";
+          if (ka === kb) return 0;
+          return ka < kb ? 1 : -1;
+        });
+    } else {
+      list = all.filter((s) => s.category === soundTab && matches(s));
+    }
+    if (!list.length) {
+      const emptyCopy = soundTab === "original"
+        ? `<div class="sound-empty"><b>Abhi koi sound nahi hai.</b><br>There are no original sounds yet. When someone posts a video with its own sound, it appears here. Sounds are added by the owner and by users and go live at once — no music is allowed on Tokisla.</div>`
+        : `<div class="sound-empty"><b>Abhi koi sound nahi hai.</b><br>There are no ${esc(SOUND_CAT_LABEL(soundTab).toLowerCase())} sounds yet. Sounds are added by the owner and by users and go live at once — no music is allowed on Tokisla.</div>`;
+      box.innerHTML = emptyCopy;
+      return;
+    }
+    box.innerHTML = "";
+    list.forEach((s) => {
+      const row = document.createElement("div");
+      row.className = "sound-row";
+      // Already-attached sound shows as Selected (same pattern as the
+      // Original-audio row) instead of offering Select again.
+      const isSelected = !!(uploadSound && String(s.id) === String(uploadSound.id));
+      row.innerHTML = `<div class="grow"><div class="t">${esc(s.title)}</div><div class="s">${soundSubtitle(s)}</div></div>
+        <button class="btn btn-ghost snd-preview" style="height:38px;padding:0 10px" type="button">Preview</button>
+        <button class="btn btn-primary snd-select" style="height:38px;padding:0 12px" type="button"${isSelected ? " disabled" : ""}>${isSelected ? "Selected" : "Select"}</button>
+        <button class="btn btn-ghost snd-report" style="height:38px;padding:0 10px" type="button">Report</button>`;
+      row.querySelector(".snd-preview").addEventListener("click", (ev) => {
+        const btn = ev.currentTarget;
+        if (!s.src) { toast("This sound has no audio to preview."); return; }
+        if (soundPreview && !soundPreview.paused && soundPreview.dataset.soundId === String(s.id)) { stopSoundPreview(); btn.textContent = "Preview"; return; }
+        stopSoundPreview();
+        // Sounds are STREAMING-ONLY: preview plays in-library through a
+        // programmatic Audio element (Preview/Stop buttons only). There
+        // is no download button, no <a download>, and no link to the
+        // audio file anywhere for sounds; selecting a sound (Select
+        // button below) attaches it to the video being created.
+        soundPreview = new Audio(s.src);
+        soundPreview.dataset.soundId = String(s.id);
+        soundPreview.play().catch(() => toast("Could not preview this sound."));
+        btn.textContent = "Stop";
+        soundPreview.onended = () => { btn.textContent = "Preview"; soundPreview = null; };
+      });
+      row.querySelector(".snd-select").addEventListener("click", () => {
+        uploadSound = { id: s.id, title: s.title, category: s.category, src: s.src };
+        updateSoundLabel(); stopSoundPreview(); hideSheets();
+        toast("Sound added: " + s.title);
+      });
+      row.querySelector(".snd-report").addEventListener("click", () => { stopSoundPreview(); reportSoundMenu(s); });
+      box.appendChild(row);
+    });
+  }
+  function reportSoundMenu(sound) {
+    if (needLogin()) return;
+    const reasons = ["Contains music", "Inappropriate content", "Abuse or harassment", "Spam", "Impersonation", "Religious disrespect", "Misinformation", "Other"];
+    openActionSheet("Report sound", reasons.map((r) => `<button class="menu-row" data-reason="${esc(r)}">${esc(r)}</button>`).join("")
+      + '<p class="muted tiny">Reported sounds stay in the library until an admin removes them.</p>');
+    $$("#actionSheetBody [data-reason]").forEach((b) => b.addEventListener("click", async () => {
+      hideSheets(); if (needLogin()) return;
+      try {
+        if (typeof store.reportSound === "function") await store.reportSound(me.id, sound.id, b.dataset.reason);
+        else await store.report(me.id, "sound", sound.id, b.dataset.reason);
+        toast("Thank you — reported sounds are removed if they break the rules, and strikes apply.");
+      } catch (ex) { toast(ex.message); }
+    }));
+  }
+  function soundFileDuration(file) {
+    return new Promise((resolve) => {
+      try {
+        const url = URL.createObjectURL(file);
+        const a = new Audio();
+        a.preload = "metadata";
+        a.onloadedmetadata = () => { const d = a.duration || null; URL.revokeObjectURL(url); resolve(d); };
+        a.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+        a.src = url;
+      } catch (e) { resolve(null); }
+    });
+  }
+  function openAddSoundForm() {
+    if (needLogin()) return;
+    stopSoundPreview();
+    openActionSheet("Add a sound", `
+      <p class="muted" style="margin-top:0;line-height:1.6">No music, no women's voices, nothing haram. Your sound goes live at once. Sounds that break the rules are removed when reported, and strikes apply. Add only audio you own or have rights to use.</p>
+      <div class="field"><label>Title</label><input id="sndAddTitle" maxlength="80" placeholder="e.g. Birds chirping"></div>
+      <div class="field"><label>Category</label><select id="sndAddCategory">${SOUND_CATS.map(([slug, label]) => `<option value="${esc(slug)}">${esc(label)}</option>`).join("")}</select></div>
+      <div class="field"><label>Audio file</label><input id="sndAddFile" type="file" accept="audio/*"></div>
+      <div id="sndAddMsg" class="small" style="margin:6px 0;color:var(--error)"></div>
+      <button class="btn btn-primary btn-block" id="sndAddSubmit" type="button">Add sound</button>`);
+    $("#sndAddSubmit").addEventListener("click", async () => {
+      const msg = $("#sndAddMsg"); if (msg) msg.textContent = "";
+      const file = $("#sndAddFile").files && $("#sndAddFile").files[0];
+      const title = $("#sndAddTitle").value;
+      const category = $("#sndAddCategory").value;
+      if (!file) { if (msg) msg.textContent = "Choose an audio file first."; return; }
+      try {
+        const duration = await soundFileDuration(file);
+        await store.addSound(me.id, { title, category, file, duration_seconds: duration });
+        soundTab = category;
+        openSoundLibrary();
+        toast("Your sound is live in the library.");
+      } catch (ex) {
+        if (msg) msg.textContent = ex.message;
+        else toast(ex.message);
+      }
+    });
+  }
+  $("#editSoundBtn").addEventListener("click", openSoundLibrary);
+  // X next to the attached sound: detach it and revert to original audio.
+  // Publishing afterwards carries no library-sound attachment (the video's
+  // own audio still auto-registers as an original sound, as before).
+  $("#editSoundClear").addEventListener("click", () => {
+    if (!uploadSound) return;
+    uploadSound = null;
+    updateSoundLabel();
+    stopSoundPreview();
+    toast("Sound removed — original audio will be used.");
+  });
+  $("#sheetBackdrop").addEventListener("click", stopSoundPreview);
+
+  /* ---- post screen ---- */
+  function syncPostScreen() {
+    const pv = $("#postPreviewVideo");
+    if (uploadBlobUrl) {
+      pv.src = uploadBlobUrl;
+      if (uploadThumb) pv.poster = uploadThumb;
+      pv.style.filter = FILTER_CSS[uploadFilter] || "";
+      pv.play().catch(() => {});
+    }
+    $("#disclosureState").textContent = uploadDisclosure ? "On" : "Off";
+    $("#locationState").textContent = uploadLocation || "Add location";
+    $("#linkState").textContent = uploadLink ? uploadLink.replace(/^https?:\/\//i, "") : "None";
+    const visLabel = uploadVisibility === "public" ? "Everyone" : uploadVisibility === "followers" ? "Followers" : "Only me";
+    $("#visibilityState").textContent = visLabel;
+    $("#visibilityLabel").textContent = uploadVisibility === "public" ? "Everyone can view this post" : uploadVisibility === "followers" ? "Followers can view this post" : "Only you can view this post";
+  }
+  function insertAtCursor(input, text) {
+    input.focus();
+    const start = input.selectionStart != null ? input.selectionStart : input.value.length;
+    const end = input.selectionEnd != null ? input.selectionEnd : input.value.length;
+    input.value = input.value.slice(0, start) + text + input.value.slice(end);
+    const pos = start + text.length;
+    try { input.setSelectionRange(pos, pos); } catch (e) {}
+  }
+  $("#postHashtagBtn").addEventListener("click", () => insertAtCursor($("#postCaption"), "#"));
+  $("#postMentionBtn").addEventListener("click", () => insertAtCursor($("#postCaption"), "@"));
+  $("#rowDisclosure").addEventListener("click", () => {
+    openActionSheet("Content disclosure and ads", `
+      <p class="muted" style="margin-top:0">Say honestly if this video is branded content or an ad.</p>
+      <label class="check-row"><input type="checkbox" id="discCheck" ${uploadDisclosure ? "checked" : ""}> This video contains branded content or is an ad.</label>
+      <button class="btn btn-primary btn-block" id="discDone">Done</button>`);
+    $("#discDone").addEventListener("click", () => { uploadDisclosure = $("#discCheck").checked; syncPostScreen(); hideSheets(); });
+  });
+  $("#rowLocation").addEventListener("click", () => {
+    openActionSheet("Location", `
+      <p class="muted" style="margin-top:0">An optional place name shown on your post. No location lookup is used — type it yourself.</p>
+      <div class="field"><label>Place name (optional)</label><input id="locInput" maxlength="256" placeholder="e.g. Quetta" value="${esc(uploadLocation)}"></div>
+      <button class="btn btn-primary btn-block" id="locDone">Done</button>`);
+    $("#locDone").addEventListener("click", () => { uploadLocation = $("#locInput").value.trim(); syncPostScreen(); hideSheets(); });
+  });
+  $("#rowLink").addEventListener("click", () => {
+    openActionSheet("Add link", `
+      <p class="muted" style="margin-top:0">An optional link shown with your post details.</p>
+      <div class="field"><label>Link (optional)</label><input id="linkInput" maxlength="300" placeholder="https://..." value="${esc(uploadLink)}"></div>
+      <button class="btn btn-primary btn-block" id="linkDone">Done</button>`);
+    $("#linkDone").addEventListener("click", () => { uploadLink = $("#linkInput").value.trim(); syncPostScreen(); hideSheets(); });
+  });
+  $("#rowVisibility").addEventListener("click", () => {
+    openActionSheet("Who can view this post", `
+      ${[["public", "Everyone", "Everyone can view this post"], ["followers", "Followers", "Only your followers can view this post"], ["private", "Only me", "Only you can view this post"]].map(([val, label, desc]) => `
+        <button class="menu-row" data-vis="${val}"><span style="flex:1;text-align:start">${label}<span class="muted" style="display:block;font-size:12.5px;font-weight:400">${desc}</span></span>${uploadVisibility === val ? "<span>" + icon("check") + "</span>" : ""}</button>`).join("")}`);
+    $$("#actionSheetBody [data-vis]").forEach((b) => b.addEventListener("click", () => { uploadVisibility = b.dataset.vis; syncPostScreen(); hideSheets(); }));
+  });
+  $("#rowMore").addEventListener("click", async () => {
+    const allow = await store.getAllowPrefs(me.id).catch(() => null);
+    const val = (k) => (allow && allow[k]) || "everyone";
+    const optRow = (key, label) => `<div class="field"><label>${label}</label><select data-allow="${key}">
+      ${[["everyone", "Everyone"], ["followers", "Followers"], ["nobody", "No one"]].map(([v, l]) => `<option value="${v}" ${val(key) === v ? "selected" : ""}>${l}</option>`).join("")}</select></div>`;
+    openActionSheet("More options", `
+      <p class="muted" style="margin-top:0">These are your existing account settings — they apply to your videos.</p>
+      ${optRow("allow_comment", "Who can comment")}
+      ${optRow("allow_mention", "Who can mention you")}
+      ${optRow("allow_like", "Who can like your videos")}
+      ${optRow("allow_download", "Who can download your videos")}
+      <label class="check-row"><input type="checkbox" id="morePollToggle" ${uploadPoll ? "checked" : ""}> Add a poll (question + two options)</label>
+      <div id="morePollFields" class="${uploadPoll ? "" : "hidden"}">
+        <div class="field"><label>Poll question</label><input id="morePollQ" maxlength="80" placeholder="Ask something..." value="${esc(uploadPoll ? uploadPoll.question : "")}"></div>
+        <div class="field"><label>Option 1</label><input id="morePollA" maxlength="30" value="${esc(uploadPoll ? uploadPoll.options[0] : "")}"></div>
+        <div class="field"><label>Option 2</label><input id="morePollB" maxlength="30" value="${esc(uploadPoll ? uploadPoll.options[1] : "")}"></div>
+      </div>
+      <button class="btn btn-primary btn-block" id="moreDone">Done</button>`);
+    $$("#actionSheetBody [data-allow]").forEach((sel) => sel.addEventListener("change", async () => {
+      try { await store.setAllowPref(me.id, sel.dataset.allow, sel.value); } catch (e) { toast(e.message); }
+    }));
+    $("#morePollToggle").addEventListener("change", (e) => $("#morePollFields").classList.toggle("hidden", !e.target.checked));
+    $("#moreDone").addEventListener("click", () => {
+      if ($("#morePollToggle").checked) {
+        const q = $("#morePollQ").value.trim(), a = $("#morePollA").value.trim(), b = $("#morePollB").value.trim();
+        if (!q || !a || !b) { toast("Poll needs a question and two options — or switch the poll off."); return; }
+        uploadPoll = { question: q, options: [a, b] };
+      } else uploadPoll = null;
+      hideSheets();
+    });
+  });
+  $("#postCoverBtn").addEventListener("click", () => {
+    const pv = $("#editPreview");
+    openActionSheet("Edit cover", `
+      <p class="muted" style="margin-top:0">Pick the frame shown as your video's cover.</p>
+      ${uploadThumb ? `<img src="${esc(uploadThumb)}" style="width:120px;height:160px;object-fit:cover;border-radius:10px;background:#000" alt="">` : '<p class="muted">No cover yet.</p>'}
+      <div class="field" style="margin-top:12px"><label>Frame in video</label><input id="coverSeek" type="range" min="0" max="${uploadDuration || 20}" step="0.1" value="${uploadTrimStart || 0}"></div>
+      <button class="btn btn-primary btn-block" id="coverSetBtn">Set cover from this frame</button>`);
+    const seek = $("#coverSeek");
+    seek.addEventListener("input", () => { try { pv.currentTime = Number(seek.value); } catch (e) {} });
+    $("#coverSetBtn").addEventListener("click", () => {
+      try {
+        const cv = document.createElement("canvas");
+        cv.width = 270; cv.height = 480;
+        const cx2 = cv.getContext("2d");
+        try { cx2.filter = FILTER_CSS[uploadFilter] || ""; } catch (err) {}
+        cx2.drawImage(pv, 0, 0, cv.width, cv.height);
+        uploadThumb = cv.toDataURL("image/jpeg", 0.6);
+        const ppv = $("#postPreviewVideo"); if (ppv) ppv.poster = uploadThumb;
+        toast("Cover updated.");
+      } catch (e) { toast("Could not capture that frame."); }
+      hideSheets();
+    });
+  });
+  $("#postBackBtn").addEventListener("click", () => { const ppv = $("#postPreviewVideo"); if (ppv) { try { ppv.pause(); } catch (e) {} } showCreateScreen("edit"); });
+
+  /* ---- drafts ---- */
+  async function openDraftsSheet(saveCurrentFirst) {
+    if (saveCurrentFirst && uploadFile) { await doSubmit(true, { silent: true }); }
+    const list = await store.myDrafts(me.id).catch(() => []);
+    openActionSheet("Drafts", list.length ? "" : '<p class="muted" style="padding:8px 2px">No drafts yet. Save this video as a draft from the post screen to finish it later.</p>');
+    const body = $("#actionSheetBody");
+    list.forEach((v) => {
+      const row = document.createElement("div");
+      row.className = "sound-row";
+      row.innerHTML = `<div class="grow"><div class="t">${esc(v.caption || "Untitled")}</div><div class="s">${v.duration_seconds}s · ${ago(v.created_at)} ago</div></div>
+        <button class="btn btn-primary draft-post" style="height:38px;padding:0 14px" type="button">Post</button>
+        <button class="btn btn-ghost draft-del" style="height:38px;padding:0 12px" type="button">Delete</button>`;
+      row.querySelector(".draft-post").addEventListener("click", async () => {
+        try { await store.publishDraft(me.id, v.id); hideSheets(); toast("Live now — your video is in the feed."); renderMyVideos(); loadFeed(); }
+        catch (e) { toast(e.message); }
+      });
+      row.querySelector(".draft-del").addEventListener("click", async () => {
+        try { await store.deleteDraft(me.id, v.id); hideSheets(); openDraftsSheet(false); renderMyVideos(); }
+        catch (e) { toast(e.message); }
+      });
+      body.appendChild(row);
+    });
+  }
+  $("#postDraftBtn").addEventListener("click", () => { if (needLogin()) return; openDraftsSheet(true); });
+
+  /* ---- submit: circular countdown, then live at once ---- */
+  function runPostCountdown() {
+    return new Promise((resolve) => {
+      const wrap = $("#postCountdown");
+      const fg = $("#countRingFg");
+      const CIRC = 213.6;
+      wrap.classList.remove("hidden");
+      const t0 = Date.now(), DUR = 1200;
+      const tick = () => {
+        const p = Math.min(1, (Date.now() - t0) / DUR);
+        fg.style.strokeDashoffset = String(CIRC * (1 - p));
+        if (p < 1) requestAnimationFrame(tick);
+        else { wrap.classList.add("hidden"); fg.style.strokeDashoffset = String(CIRC); resolve(); }
+      };
+      requestAnimationFrame(tick);
+    });
+  }
+  function effectiveDuration() {
+    const end = uploadTrimEnd || uploadDuration || 0;
+    return Math.max(0, end - uploadTrimStart);
+  }
+  async function doSubmit(isDraft, opts) {
+    if (needLogin()) return null;
+    if (!uploadFile || !uploadDuration) { toast("Choose or record a video first."); return null; }
+    const dur = effectiveDuration();
+    if (!(dur > 0) || dur > CFG.MAX_VIDEO_SECONDS + 0.5) {
+      const m = $("#postMsg"); if (m) { m.textContent = "This video is " + dur.toFixed(1) + "s — Tokisla allows max " + CFG.MAX_VIDEO_SECONDS + " seconds. Use Crop to keep a shorter part."; m.style.color = "var(--error)"; }
+      return null;
+    }
+    const meta = {
+      caption: $("#postCaption").value,
+      visibility: uploadVisibility, duration_seconds: Math.round(dur * 100) / 100,
+      size_bytes: uploadFile.size, storage_path: "", thumbnail_path: uploadThumb || "",
+      filter: uploadFilter, poll: uploadPoll,
+      duet_of: duetTarget ? duetTarget.id : null,
+      reply_comment_id: replyTarget ? replyTarget.commentId : null,
+      is_draft: !!isDraft,
+      trim_start_seconds: uploadTrimStart,
+      trim_end_seconds: uploadTrimEnd || uploadDuration,
+      content_disclosure: uploadDisclosure,
+      link_url: uploadLink || null,
+    };
+    if (uploadLocation) meta.location = uploadLocation;
+    if (uploadSound) {
+      meta.sound_id = uploadSound.id; meta.sound_title = uploadSound.title;
+      // Original sounds have no library tab: sound_category stays null
+      // for them (the video sound_category enum is the 4 tabs only),
+      // in both demo and live, so the two stores agree.
+      if (SOUND_CATS.some(([slug]) => slug === uploadSound.category)) meta.sound_category = uploadSound.category;
+    }
+    const msgEl = $("#postMsg");
+    try {
       let created;
       if (DEMO) {
         meta.storage_path = "demo-upload";
         created = await store.submitVideo(me.id, meta);
-        sessionUploads[created.id] = $("#uploadPreview").src;
-        if (uploadThumb) { /* thumb stored as data URL in the row */ }
+        sessionUploads[created.id] = uploadBlobUrl;
       } else {
-        // Live: create-upload Edge Function verifies metadata server-side,
-        // returns { video, upload_url }; we PUT the file, the row stays
-        // 'pending' until a moderator approves it.
-        created = await store.submitVideo(me.id, { ...meta, filename: uploadFile.name, content_type: uploadFile.type });
+        // Live (Appwrite inverted flow): the store uploads the File
+        // bytes to the media bucket first, then create-upload
+        // validates and creates the row; the store returns
+        // { video, upload_url: null } (no PUT step — upload_url is
+        // always null, so the guard below never fires). The row is
+        // created with the live status directly — no review queue.
+        created = await store.submitVideo(me.id, { ...meta, file: uploadFile, filename: uploadFile.name, content_type: uploadFile.type });
         if (created && created.upload_url) {
           await fetch(created.upload_url, { method: "PUT", headers: { "Content-Type": uploadFile.type }, body: uploadFile });
         }
         created = created.video || created;
       }
-      clearInterval(iv); bar.style.width = "100%";
       if (isDraft) {
         store.logEvent(me.id, "Draft saved", meta.caption);
-        toast("Saved as a draft — post it any time from My videos below.");
-        $("#uploadMsg").textContent = "Draft saved. Only you can see it until you post it for review.";
+        if (!(opts && opts.silent)) toast("Saved as a draft — post it any time from Drafts.");
+        if (msgEl) { msgEl.textContent = "Draft saved. Only you can see it until you post it."; msgEl.style.color = "var(--emerald)"; }
       } else {
         store.logEvent(me.id, "Video uploaded", meta.caption);
-        toast("Sent for review — it will appear in the feed once approved.");
-        $("#uploadMsg").textContent = DEMO ? "Demo: your video is in the moderation queue. Open the Admin panel (admin.html) to approve it." : "Your video is in the moderation queue.";
+        if (!(opts && opts.silent)) toast("Live now — your video is in the feed.");
+        if (msgEl) { msgEl.textContent = "Live now — your video is in the feed."; msgEl.style.color = "var(--emerald)"; }
       }
-      $("#uploadMsg").style.color = "var(--emerald)";
-      uploadFile = null; $("#publishBtn").disabled = true; $("#draftBtn").disabled = true;
+      const hadFile = !!uploadFile;
+      uploadFile = null; uploadBlobUrl = "";
       duetTarget = null; replyTarget = null; updateCreateContext();
       renderMyVideos();
+      return created;
     } catch (ex) {
-      clearInterval(iv); wrap.classList.add("hidden");
-      $("#uploadMsg").textContent = ex.message; $("#uploadMsg").style.color = "var(--error)";
+      if (msgEl) { msgEl.textContent = ex.message; msgEl.style.color = "var(--error)"; }
+      else toast(ex.message);
+      return null;
     }
   }
-  $("#publishBtn").addEventListener("click", () => doSubmit(false));
-  $("#draftBtn").addEventListener("click", () => { if (uploadFile) doSubmit(true); });
+  $("#postPublishBtn").addEventListener("click", async () => {
+    if (needLogin()) return;
+    if (!$("#postPolicyCheck").checked) { toast("Please confirm the video follows the Community Guidelines first."); return; }
+    if (!uploadFile || !uploadDuration) { toast("Choose or record a video first."); return; }
+    if (effectiveDuration() <= 0 || effectiveDuration() > CFG.MAX_VIDEO_SECONDS + 0.5) { toast("Use Crop to keep a part within " + CFG.MAX_VIDEO_SECONDS + " seconds."); return; }
+    await runPostCountdown();
+    const created = await doSubmit(false);
+    if (created) { showCreateScreen("home"); goto("home"); }
+  });
   async function renderMyVideos() {
     if (!me) return;
     const list = await store.myVideos(me.id).catch(() => []);
-    const box = $("#myVideos"); box.innerHTML = list.length ? "" : '<p class="muted center" style="padding:12px">You have not uploaded any videos yet.</p>';
+    const box = $("#myVideos"); if (!box) return;
+    box.innerHTML = list.length ? "" : '<p class="muted center" style="padding:12px">You have not uploaded any videos yet.</p>';
+    const statusLabel = (v) => v.moderation_status === "approved" ? "Live" : v.moderation_status === "draft" ? "Draft" : v.moderation_status === "rejected" ? "Removed" : "In review";
     list.forEach((v) => {
       const el = document.createElement("div");
       el.className = "list-item";
       el.innerHTML = `${v.thumbnail_path ? `<img class="thumb" src="${esc(v.thumbnail_path)}" alt="">` : ""}
         <div class="grow"><div class="t">${esc(v.caption || "Untitled")}</div>
-        <div class="s">${v.duration_seconds}s · ${ago(v.created_at)} ago</div>
+        <div class="s">${v.duration_seconds}s · ${ago(v.created_at)} ago${v.location ? " · " + esc(v.location) : ""}${v.sound_title ? " · Sound: " + esc(v.sound_title) : ""}</div>
         ${v.moderation_status === "rejected" && v.rejection_reason ? `<div class="s" style="color:var(--error)">Reason: ${esc(v.rejection_reason)}</div>` : ""}</div>
-        <span class="status ${v.moderation_status}">${v.moderation_status === "needs_review" ? "needs review" : v.moderation_status}</span>`;
+        <span class="status ${v.moderation_status}">${statusLabel(v)}</span>`;
       if (v.moderation_status === "draft") {
         const acts = document.createElement("div");
         acts.style.display = "flex"; acts.style.gap = "6px"; acts.style.marginTop = "8px";
-        const pb = document.createElement("button"); pb.className = "btn btn-primary"; pb.style.height = "36px"; pb.textContent = "Post for review";
-        pb.addEventListener("click", async () => { try { await store.publishDraft(me.id, v.id); toast("Sent for review."); renderMyVideos(); } catch (e) { toast(e.message); } });
+        const pb = document.createElement("button"); pb.className = "btn btn-primary"; pb.style.height = "36px"; pb.textContent = "Post";
+        pb.addEventListener("click", async () => { try { await store.publishDraft(me.id, v.id); toast("Live now — your video is in the feed."); renderMyVideos(); loadFeed(); } catch (e) { toast(e.message); } });
         const db = document.createElement("button"); db.className = "btn btn-ghost"; db.style.height = "36px"; db.textContent = "Delete";
         db.addEventListener("click", async () => { try { await store.deleteDraft(me.id, v.id); renderMyVideos(); } catch (e) { toast(e.message); } });
         acts.appendChild(pb); acts.appendChild(db); el.appendChild(acts);
@@ -1353,12 +1949,13 @@
       <li>No spam, scams, misleading or dangerous content.</li>
       <li>No impersonation of other people or organisations.</li>
       <li>Respect Islam, the Quran, the Prophet ﷺ, all Prophets, scholars and every religion — no disrespect or mockery.</li>
-      <li>Every video is reviewed by our moderation team before it appears publicly.</li>
+      <li>No women appear in videos, and nothing haram — no music, no songs, no instruments.</li>
+      <li>Posts go live immediately. Videos that break these rules are removed when reported, and strikes apply: repeated violations can lead to removal, restricted features, suspension or a permanent ban.</li>
     </ul><p class="muted">Breaking the rules can lead to removal, restricted features, suspension or a permanent ban. You may appeal any decision from the app.</p>`;
   const TERMS = `<div style="line-height:1.65">
   <p><b>1. Your account.</b> You must be at least 13 years old to use Tokisla. You are responsible for your account, your password and everything posted through it. One person, one account — impersonation is not allowed.</p>
   <p><b>2. Your content.</b> You keep ownership of the videos you upload. By uploading, you give Tokisla permission to store, process and show your video inside the app so other users can watch it. Only upload content you created or have clear permission to share.</p>
-  <p><b>3. Moderation.</b> Every upload is reviewed by a human moderator before it becomes public. We may reject, remove or limit any content that breaks the Community Guidelines, and we may suspend accounts that break the rules repeatedly.</p>
+  <p><b>3. Moderation.</b> Posts go live immediately. We may remove or limit any content that breaks the Community Guidelines when it is reported, and we may suspend accounts that break the rules repeatedly. Strikes apply to repeated violations.</p>
   <p><b>4. Video rules.</b> Videos must be 20 seconds or shorter. Content must follow the Community Guidelines at all times, including the no-music policy.</p>
   <p><b>5. Acceptable use.</b> Do not use Tokisla for spam, scams, harassment, illegal activity, or to collect other users' data. Do not try to break, overload or reverse-engineer the service.</p>
   <p><b>6. Availability.</b> Tokisla is provided "as is". Features may change, and the service may be interrupted for maintenance or reasons beyond our control. We are not liable for indirect losses arising from use of the service, to the maximum extent allowed by law.</p>
@@ -1371,8 +1968,8 @@
   <li><b>Content:</b> videos you upload, comments, likes, saves, follows, reports and blocks.</li>
   <li><b>Activity:</b> your watch history, search history and account history — these are private to you and exist so the Activity center can show them to you.</li>
   <li><b>Technical:</b> basic device and app information needed to run and secure the service.</li></ul>
-  <p><b>How we use it.</b> To run your account, show your content, moderate uploads for safety, prevent abuse, and improve the app. We do not sell your personal data, and we do not show your email address to anyone — it is never public.</p>
-  <p><b>Who can see what.</b> Your profile and approved public videos are visible to other users according to your privacy settings (private account, Locked videos and the Allow options in Settings). Your histories, settings and email are visible only to you. Moderators see uploads and reports in order to review them.</p>
+  <p><b>How we use it.</b> To run your account, show your content, remove reported uploads that break the rules, prevent abuse, and improve the app. We do not sell your personal data, and we do not show your email address to anyone — it is never public.</p>
+  <p><b>Who can see what.</b> Your profile and public videos are visible to other users according to your privacy settings (private account, Locked videos and the Allow options in Settings). Your histories, settings and email are visible only to you. Moderators see uploads and reports in order to act on reports.</p>
   <p><b>Sharing.</b> We share data only with the service providers needed to run Tokisla (hosting and storage), or when the law requires it.</p>
   <p><b>Your choices.</b> You can edit your profile, change who can interact with you, block users, and delete your account at any time from Settings and privacy. Deleting your account removes your profile, videos, comments and histories.</p>
   <p><b>Children.</b> Tokisla is not for children under 13.</p>

@@ -3,9 +3,10 @@
  * DEMO MODE (config keys empty): everything runs on localStorage with seeded
  * sample data so every flow can be tested end-to-end. Clearly badged in the UI.
  *
- * LIVE MODE: talks to Supabase (schema in supabase/migrations). The app only
- * ever uses the anon key + RLS; uploads go through the create-upload Edge
- * Function for a signed URL (never a service-role key in the client).
+ * LIVE MODE: talks to Appwrite Cloud (schema in APPWRITE_SETUP.md /
+ * schema.json). The app only ever uses the public endpoint + project ID
+ * from config.js; privileged work runs inside Appwrite Functions holding
+ * the API key server-side (never a secret key in the client).
  *
  * This file is DOM-free so it can be unit-tested in Node (tests/store.test.mjs).
  */
@@ -13,10 +14,97 @@
   "use strict";
 
   const CFG = (global.TOKISLA_CONFIG || {
-    SUPABASE_URL: "", SUPABASE_ANON_KEY: "",
+    APPWRITE_ENDPOINT: "", APPWRITE_PROJECT_ID: "",
     MAX_VIDEO_SECONDS: 20, MAX_VIDEO_MB: 15, APP_NAME: "Tokisla",
   });
-  const DEMO = !CFG.SUPABASE_URL;
+  const DEMO = !CFG.APPWRITE_PROJECT_ID;
+
+  /* Sounds library catalog (client-read; see store.listSounds / addSound).
+   * Shape per entry: { id, title, category, duration_seconds, src, source }
+   * where category is one of SOUND_CATEGORIES, src is a playable URL or a
+   * media-bucket file id (live mode resolves it), and source is the
+   * licence / rights note shown next to the sound.
+   * The built-in catalog is DELIBERATELY EMPTY: no naat / taqreer audio
+   * exists in the workspace and no copyrighted audio may be bundled or
+   * invented. The library is populated by the owner AND by signed-in
+   * users (direct-to-library, no approval — see addSound), plus
+   * original sounds auto-registered when a video goes live with its
+   * own sound (see registerOriginalSound in the demo store and the
+   * create-upload function in live mode). Those entries persist in
+   * demo mode (localStorage) and live in the media bucket in live mode. */
+  const SOUNDS_CATALOG = [];
+  /* Sounds catalog file loader (2026-11-03 fix-up pass).
+   * Catalog file path (the ONE fixed path): "sounds-catalog.json",
+   * at the app root next to index.html / store.js. The file holds a
+   * JSON array of catalog entries shaped { id, title, category,
+   * duration_seconds, src, source }; it ships EMPTY ([]) — no audio
+   * is bundled or seeded from it, and nothing is ever downloaded,
+   * copied, or seeded from any staging/research material. listSounds()
+   * loads it lazily on first library open (the sounds sheet calls
+   * listSounds), merges its entries with the empty inline catalog
+   * above and with admin-added sounds, and dedupes by id. Any
+   * failure — fetch unavailable, file absent (non-OK), or malformed
+   * content — falls back SILENTLY to the empty inline catalog, so
+   * demo mode and the honest empty states keep working exactly as
+   * before. The loader never enforces the 20-second video limit: a
+   * catalog entry's duration_seconds is display metadata only. An
+   * explicit fetcher argument forces a reload (used by tests);
+   * without one, the result is cached for the page lifetime. */
+  const SOUNDS_CATALOG_PATH = "sounds-catalog.json";
+  let soundsCatalogCache = null;
+  function normalizeCatalogEntry(entry) {
+    if (!entry || typeof entry !== "object") return null;
+    const id = String(entry.id || "").trim();
+    const title = String(entry.title || "").trim().slice(0, 80);
+    const category = String(entry.category || "").trim();
+    const src = String(entry.src || "").trim();
+    if (!id || !title || !src) return null;
+    if (!SOUND_CATEGORIES.some(([slug]) => slug === category)) return null;
+    const dur = Number(entry.duration_seconds);
+    return { id, title, category,
+      duration_seconds: Number.isFinite(dur) && dur >= 0 ? dur : null,
+      src, source: typeof entry.source === "string" ? entry.source.trim().slice(0, 120) : "" };
+  }
+  function dedupeSounds(list) {
+    const seen = new Set();
+    const out = [];
+    (list || []).forEach((s) => {
+      if (s && s.id && !seen.has(String(s.id))) { seen.add(String(s.id)); out.push({ ...s }); }
+    });
+    return out;
+  }
+  async function loadSoundsCatalogFrom(fetchFn) {
+    try {
+      if (typeof fetchFn !== "function") return [];
+      const res = await fetchFn(SOUNDS_CATALOG_PATH);
+      if (res && res.ok === false) return [];
+      const data = Array.isArray(res) ? res : (res && typeof res.json === "function" ? await res.json() : null);
+      if (!Array.isArray(data)) return [];
+      return dedupeSounds(data.map(normalizeCatalogEntry).filter(Boolean));
+    } catch (e) { return []; }
+  }
+  async function loadSoundsCatalog(fetcher) {
+    if (fetcher) {
+      soundsCatalogCache = await loadSoundsCatalogFrom(fetcher);
+      return soundsCatalogCache.slice();
+    }
+    if (soundsCatalogCache !== null) return soundsCatalogCache.slice();
+    const fetchFn = (typeof global.fetch === "function") ? global.fetch.bind(global) : null;
+    soundsCatalogCache = await loadSoundsCatalogFrom(fetchFn);
+    return soundsCatalogCache.slice();
+  }
+  const SOUND_CATEGORIES = [
+    ["sound-effects", "Sound Effects"],
+    ["naat", "Naat"],
+    ["taqreer", "Taqreer"],
+    ["islamic", "Islamic"],
+  ];
+  /* Original sounds are auto-only: category "original" is never a
+   * user-pickable tab in addSound and never a catalog-file category
+   * (normalizeCatalogEntry still rejects it). Original entries carry
+   * source_type "original", a stable id "original-<videoId>", and
+   * video_id, so catalog + rows + originals merge deduped by id. */
+  const SOUND_ORIGINAL_CATEGORY = "original";
 
   const CATEGORIES = [
     "Islamic Knowledge", "Quran and Recitation", "Hadith and Sunnah",
@@ -99,6 +187,7 @@
       users: [], // demo auth accounts {id, email, password, profile_id}
       prefs: {}, session: null, watchHistory: [], accountEvents: [], verifyRequests: [], messages: [],
       commentLikes: [], pollVotes: [],
+      sounds: [], // owner/admin-added sounds (see SOUNDS_CATALOG); built-in catalog is empty
       stories: [{ id: "s-user-1", user_id: "u-owner", media_type: "image", storage_path: "assets/user/user-3.jpg",
         caption: "Quetta ki shaam", duration_seconds: null, moderation_status: "approved", created_at: now() }],
       storyViews: [],
@@ -122,6 +211,7 @@
     let S = loadDemo(storage);
     S.watchHistory = S.watchHistory || []; S.accountEvents = S.accountEvents || []; S.verifyRequests = S.verifyRequests || []; S.messages = S.messages || [];
     S.commentLikes = S.commentLikes || []; S.pollVotes = S.pollVotes || []; S.stories = S.stories || []; S.storyViews = S.storyViews || [];
+    S.sounds = S.sounds || [];
     const save = () => saveDemo(storage, S);
     const profileOf = (id) => S.profiles.find((p) => p.id === id) || null;
     const pubVideo = (v) => {
@@ -174,6 +264,28 @@
       { allow_comment: "everyone", allow_mention: "everyone", allow_like: "everyone", allow_download: "everyone", view_follow_list: "everyone" },
       (S.prefs[userId] || {}));
     const followsCreator = (me, creator) => S.follows.some((f) => f.follower_id === me && f.following_id === creator);
+    /* Original-sound auto-register (user decision 2026-11-03): when a
+     * video goes live with NO library sound chosen, its own audio
+     * becomes a library entry at once. Stable id "original-<videoId>",
+     * deduped by video_id (never a second entry for the same video).
+     * Videos already live before this change get nothing: this helper
+     * only runs on the publish events below, never on load/seed. */
+    const registerOriginalSound = (video) => {
+      if (!video || video.sound_id) return null;
+      if ((S.sounds || []).some((s) => s.video_id === video.id || s.id === "original-" + video.id)) return null;
+      const creator = profileOf(video.creator_id);
+      const username = creator && creator.username ? creator.username : "";
+      const entry = { id: "original-" + video.id,
+        title: username ? "Original sound — @" + username : "Original sound",
+        category: SOUND_ORIGINAL_CATEGORY,
+        duration_seconds: video.duration_seconds || null,
+        src: video.storage_path || "", source: "Original audio",
+        creator_id: video.creator_id || null, creator_username: username || null,
+        source_type: "original", video_id: video.id, status: "live", report_count: 0,
+        created_at: now() };
+      S.sounds.push(entry);
+      return entry;
+    };
 
     return {
       mode: "demo",
@@ -188,7 +300,7 @@
         S.profiles.push(prof);
         S.users.push({ id: prof.id, email, password: String(password), profile_id: prof.id });
         const chair = S.profiles.find((x) => x.username === "chairman.wadood");
-        if (chair) S.messages.push({ id: uid(), sender_id: chair.id, recipient_id: prof.id, body: "Assalamu alaikum! Welcome to Tokisla. Post short, positive videos - every video is checked by our team before it goes live.", is_read: false, created_at: now() });
+        if (chair) S.messages.push({ id: uid(), sender_id: chair.id, recipient_id: prof.id, body: "Assalamu alaikum! Welcome to Tokisla. Posts go live immediately. Videos that break the rules (music, women, haram content) are removed when reported, and strikes apply.", is_read: false, created_at: now() });
         S.session = prof.id; save();
         return prof;
       },
@@ -231,8 +343,8 @@
         } else {
           const pref = new Set((S.prefs[me] || {}).category_ids || []);
           list = list.slice().sort((a, b) => {
-            const sa = (a.category_ids.some((c) => pref.has(c)) ? 2 : 0) + a.like_count / 100;
-            const sb = (b.category_ids.some((c) => pref.has(c)) ? 2 : 0) + b.like_count / 100;
+            const sa = (((a.category_ids || []).some((c) => pref.has(c))) ? 2 : 0) + a.like_count / 100;
+            const sb = (((b.category_ids || []).some((c) => pref.has(c))) ? 2 : 0) + b.like_count / 100;
             return sb - sa || (a.created_at < b.created_at ? 1 : -1);
           });
         }
@@ -504,21 +616,91 @@
           if (rc) replyVideoId = rc.video_id;
         }
         const isDraft = meta.is_draft === true;
+        // NO pre-publication review: a posted video goes live at once with
+        // the exact status the feed query uses ("approved"). category_ids
+        // is deliberately NOT stored: the upload/post path carries no
+        // categories (Discover keeps working off older rows, tolerating
+        // videos that carry none). `location` is the optional free-text
+        // place name, stored under exactly that field name.
+        const location = String(meta.location || "").trim().slice(0, 256);
         const v = {
           id: uid(), creator_id: me, caption: String(meta.caption || "").slice(0, 300),
           storage_provider: "demo", storage_path: meta.storage_path || "",
           thumbnail_path: meta.thumbnail_path || "", duration_seconds: meta.duration_seconds,
           size_bytes: meta.size_bytes || null, visibility: meta.visibility || "public",
-          moderation_status: isDraft ? "draft" : "pending", rejection_reason: null,
-          published_at: null, created_at: now(), like_count: 0, comment_count: 0,
-          category_ids: meta.category_ids || [],
+          moderation_status: isDraft ? "draft" : "approved", rejection_reason: null,
+          published_at: isDraft ? null : now(), created_at: now(), like_count: 0, comment_count: 0,
+          location: location || null,
+          sound_id: meta.sound_id || null,
+          sound_title: meta.sound_title ? String(meta.sound_title).slice(0, 80) : null,
+          sound_category: meta.sound_category || null,
+          trim_start_seconds: Number(meta.trim_start_seconds) || 0,
+          trim_end_seconds: Number(meta.trim_end_seconds) || meta.duration_seconds,
+          content_disclosure: meta.content_disclosure === true,
+          link_url: meta.link_url ? String(meta.link_url).slice(0, 300) : null,
           filter: FILTERS.includes(meta.filter) ? meta.filter : "normal",
           poll, duet_of: meta.duet_of || null,
           reply_comment_id: meta.reply_comment_id || null, reply_video_id: replyVideoId,
         };
         S.videos.push(v);
-        if (!isDraft) notifyMentions(me, v.caption, v.id, [v.creator_id]);
+        if (!isDraft) { notifyMentions(me, v.caption, v.id, [v.creator_id]); registerOriginalSound(v); }
         save(); return v;
+      },
+      /* --- sounds library (catalog + user-added + original sounds) ---
+       * Direct-to-library (user decision 2026-11-03): ANY signed-in
+       * user can add a sound; it goes live at once with status "live"
+       * and no admin approval. Violations are removed via report +
+       * strike. deleteSound marks a row status "removed" (row kept);
+       * listSounds filters removed rows out. */
+      async loadSoundsCatalog(fetcher) { return loadSoundsCatalog(fetcher); },
+      async listSounds() {
+        const catalog = await loadSoundsCatalog();
+        const catalogSounds = SOUNDS_CATALOG.concat(catalog).map((s) => Object.assign(
+          { creator_id: null, creator_username: null, video_id: null, report_count: 0, status: "live", source_type: "catalog" }, s,
+          { source_type: s.source_type || "catalog", status: s.status || "live", report_count: Number(s.report_count) || 0 }));
+        const rows = (S.sounds || [])
+          .filter((s) => (s.status || "live") !== "removed")
+          .map((s) => Object.assign(
+            { creator_id: null, creator_username: null, video_id: null, report_count: 0, status: "live", source_type: "admin", created_at: null }, s,
+            { source_type: s.source_type || "admin", status: s.status || "live", report_count: Number(s.report_count) || 0 }));
+        return dedupeSounds(catalogSounds.concat(rows));
+      },
+      async addSound(me, input) {
+        const prof = profileOf(me);
+        if (!prof) throw new Error("Sign in to add a sound.");
+        const title = String((input && input.title) || "").trim().slice(0, 80);
+        const category = String((input && input.category) || "");
+        if (!title) throw new Error("Give the sound a title.");
+        if (!SOUND_CATEGORIES.some(([slug]) => slug === category)) throw new Error("Pick a sound category.");
+        let src = String((input && input.src) || "").trim();
+        if (input && input.file) {
+          const blob = input.file;
+          if (blob.size > 8 * 1024 * 1024) throw new Error("Audio file is too large for demo storage (max 8 MB).");
+          src = await blobToDataUrl(blob);
+        }
+        if (!src) throw new Error("Choose an audio file for the sound.");
+        const isStaff = prof.role === "admin" || prof.role === "moderator";
+        const sound = { id: uid(), title, category,
+          duration_seconds: Number((input && input.duration_seconds) || 0) || null,
+          src, source: String((input && input.source) || "").trim().slice(0, 120) || (isStaff ? "Added by the owner" : "Added by @" + prof.username),
+          creator_id: me, creator_username: prof.username,
+          source_type: isStaff ? "admin" : "user", status: "live", report_count: 0,
+          video_id: (input && input.video_id) || null, created_at: now() };
+        S.sounds.push(sound); save(); return { ...sound };
+      },
+      async deleteSound(me, soundId) {
+        const prof = profileOf(me);
+        if (!prof || !(prof.role === "admin" || prof.role === "moderator")) throw new Error("Only the owner/admin can remove sounds.");
+        const row = (S.sounds || []).find((s) => s.id === soundId);
+        if (!row) throw new Error("Sound not found.");
+        row.status = "removed"; save();
+      },
+      async reportSound(me, soundId, reason) {
+        if (!me) throw new Error("Sign in to report a sound.");
+        const clean = String(reason || "").trim().slice(0, 500);
+        if (!clean) throw new Error("Give a reason for the report.");
+        S.reports.push({ id: uid(), reporter_id: me, target_type: "sound", target_id: soundId, reason: clean, status: "open", created_at: now() });
+        save();
       },
       async myDrafts(me) {
         return S.videos.filter((v) => v.creator_id === me && v.moderation_status === "draft")
@@ -527,8 +709,11 @@
       async publishDraft(me, videoId) {
         const v = S.videos.find((x) => x.id === videoId);
         if (!v || v.creator_id !== me || v.moderation_status !== "draft") throw new Error("Draft not found.");
-        v.moderation_status = "pending";
+        // Drafts go live at once, same as a fresh post: "approved".
+        v.moderation_status = "approved";
+        v.published_at = now();
         notifyMentions(me, v.caption, v.id, [v.creator_id]);
+        registerOriginalSound(v);
         save(); return v;
       },
       async deleteDraft(me, videoId) {
@@ -633,7 +818,7 @@
         const v = S.videos.find((x) => x.id === videoId); if (!v) throw new Error("Video not found.");
         v.moderation_status = decision;
         v.rejection_reason = decision === "rejected" ? (reason || "") : null;
-        if (decision === "approved") v.published_at = now();
+        if (decision === "approved") { v.published_at = now(); registerOriginalSound(v); }
         S.reviews.push({ id: uid(), video_id: videoId, reviewer_id: adminId, decision, reason: reason || "", created_at: now() });
         S.notifications.push({ id: uid(), user_id: v.creator_id, type: "moderation", actor_id: null, video_id: videoId, is_read: false, created_at: now() });
         save(); return v;
@@ -687,31 +872,509 @@
   }
 
   /* ------------------------------------------------------------ LIVE store */
-  function makeLiveStore(sb) {
-    // Implemented against supabase/migrations (views + RLS). First live run
-    // happens on the owner's second account (SETUP_GUIDE checklist).
-    const pub = (v) => v;
+  /* Live mode talks to Appwrite Cloud (see APPWRITE_SETUP.md + schema.json
+   * for the collection/bucket/function layout). The client holds NO secret:
+   * only the public endpoint + project ID from config.js. All privileged
+   * work (moderation, profile creation, counters, cascades) runs inside
+   * Appwrite Functions holding the API key server-side; the client only
+   * ever calls them through Functions.createExecution. Document and file
+   * permissions from the spec are attached on every create below.
+   * Counters (like_count / comment_count / view_count) are NEVER written
+   * by this file. This file stays DOM-free so it can be loaded in Node. */
+
+  const APPWRITE_DB = "tokisla";
+  /* Category slugs in the Appwrite seed (APPWRITE_SETUP.md §9 / schema.json)
+   * differ from the regex slugs derived from names in the shared CATEGORIES
+   * constant (e.g. seed "halal-funny" vs UI "halal-funny-videos", seed
+   * "quran-recitation" vs UI "quran-and-recitation"). The database join
+   * key is the SEED slug (spec J4); the UI keeps numeric ids. Translate
+   * through this table (index = CATEGORIES order, sort_order 1-20). */
+  const SPEC_CATEGORY_SLUGS = [
+    "islamic-knowledge", "quran-recitation", "hadith-sunnah", "duas-reminders",
+    "islamic-history-seerah", "islamic-motivation", "halal-funny", "clean-comedy",
+    "educational", "science-gk", "life-lessons", "motivational-stories",
+    "personal-development", "manners-character", "family-society",
+    "positive-entertainment", "language-learning", "technology-skills",
+    "halal-business", "health-lifestyle",
+  ];
+  const MEDIA_BUCKET = "media";
+  const API_FUNCTION = "api";
+
+  /* Minimal fallbacks matching the verified Appwrite Web SDK 29.2.0 string
+   * shapes, used only when the caller did not supply the SDK namespace
+   * (e.g. a Node test harness with a mocked TablesDB). In the browser the
+   * real SDK namespace from the vendored script is always used instead. */
+  const fallbackQuery = {
+    equal: (attribute, values) => JSON.stringify({ method: "equal", attribute, values: Array.isArray(values) ? values : [values] }),
+    notEqual: (attribute, values) => JSON.stringify({ method: "notEqual", attribute, values: Array.isArray(values) ? values : [values] }),
+    greaterThan: (attribute, values) => JSON.stringify({ method: "greaterThan", attribute, values: Array.isArray(values) ? values : [values] }),
+    lessThan: (attribute, values) => JSON.stringify({ method: "lessThan", attribute, values: Array.isArray(values) ? values : [values] }),
+    search: (attribute, values) => JSON.stringify({ method: "search", attribute, values: Array.isArray(values) ? values : [values] }),
+    orderAsc: (attribute) => JSON.stringify({ method: "orderAsc", attribute }),
+    orderDesc: (attribute) => JSON.stringify({ method: "orderDesc", attribute }),
+    limit: (value) => JSON.stringify({ method: "limit", values: [value] }),
+    offset: (value) => JSON.stringify({ method: "offset", values: [value] }),
+    or: (queries) => JSON.stringify({ method: "or", values: queries.map((q) => (typeof q === "string" ? JSON.parse(q) : q)) }),
+    and: (queries) => JSON.stringify({ method: "and", values: queries.map((q) => (typeof q === "string" ? JSON.parse(q) : q)) }),
+  };
+  const fallbackPermission = {
+    read: (role) => "read(\"" + role + "\")",
+    update: (role) => "update(\"" + role + "\")",
+    delete: (role) => "delete(\"" + role + "\")",
+  };
+  const fallbackRole = {
+    any: () => "any",
+    users: () => "users",
+    user: (id) => "user:" + id,
+    team: (id) => "team:" + id,
+  };
+  const fallbackId = {
+    unique: () => uid(),
+    custom: (id) => id,
+  };
+
+  function throwingService(name, methods) {
+    const svc = {};
+    methods.forEach((m) => {
+      svc[m] = () => { throw new Error("Appwrite client was not provided to the live store (" + name + "." + m + ")."); };
+    });
+    return svc;
+  }
+
+  function resolveServices(input) {
+    const sdk = (typeof global !== "undefined" && global.Appwrite) ? global.Appwrite : null;
+    const Query = (input && input.Query) || (sdk && sdk.Query) || fallbackQuery;
+    const Permission = (input && input.Permission) || (sdk && sdk.Permission) || fallbackPermission;
+    const Role = (input && input.Role) || (sdk && sdk.Role) || fallbackRole;
+    const ID = (input && input.ID) || (sdk && sdk.ID) || fallbackId;
+    const bundle = input || {};
+    /* A services bundle (built by app.js / admin.html from the SDK, or a
+     * test mock) wins over constructing services from a raw Client. */
+    const hasBundle = bundle.tables || bundle.tablesDB || bundle.account || bundle.storage || bundle.functions;
+    if (hasBundle) {
+      return {
+        Query, Permission, Role, ID,
+        account: bundle.account || throwingService("Account", ["create", "createEmailPasswordSession", "deleteSession", "get", "createRecovery"]),
+        tables: bundle.tables || bundle.tablesDB || throwingService("TablesDB", ["listRows", "createRow", "updateRow", "deleteRow", "getRow", "upsertRow"]),
+        storage: bundle.storage || throwingService("Storage", ["createFile", "getFileView", "getFileDownload", "deleteFile"]),
+        functions: bundle.functions || throwingService("Functions", ["createExecution"]),
+      };
+    }
+    const client = bundle.client || (typeof bundle.call === "function" ? bundle : null) || null;
+    const ns = bundle.sdk || sdk;
+    if (client && ns) {
+      return {
+        Query, Permission, Role, ID,
+        account: new ns.Account(client),
+        tables: new ns.TablesDB(client),
+        storage: new ns.Storage(client),
+        functions: new ns.Functions(client),
+      };
+    }
+    /* No usable client: every backend call throws a clear error instead of
+     * crashing at construction time (demo mode never reaches here). */
+    return {
+      Query, Permission, Role, ID,
+      account: throwingService("Account", ["create", "createEmailPasswordSession", "deleteSession", "get", "createRecovery"]),
+      tables: throwingService("TablesDB", ["listRows", "createRow", "updateRow", "deleteRow", "getRow", "upsertRow"]),
+      storage: throwingService("Storage", ["createFile", "getFileView", "getFileDownload", "deleteFile"]),
+      functions: throwingService("Functions", ["createExecution"]),
+    };
+  }
+
+  function isNotFound(err) {
+    if (!err) return false;
+    return err.code === 404 || err.type === "document_not_found" || /not found|document.*not.*exist|row.*not.*exist/i.test(String(err.message || ""));
+  }
+  function isPermissionError(err) {
+    if (!err) return false;
+    const code = Number(err.code || err.status || err.statusCode);
+    if (code === 401 || code === 403) return true;
+    return /permission|forbidden|unauthori[sz]ed|not allowed|\b401\b|\b403\b/i.test(String(err.message || err.type || ""));
+  }
+  function isUnknownAttributeError(err) {
+    if (!err) return false;
+    return /unknown attribute|attribute.*does not exist|invalid attribute|no such attribute|attribute.*not found/i.test(errMessage(err));
+  }
+  function asError(err) {
+    if (err instanceof Error) return err;
+    return new Error((err && err.message) || "Request failed.");
+  }
+  function errMessage(err) {
+    return (err && err.message) || "Request failed.";
+  }
+  /* Account already exists (409 / user_already_exists): the caller may
+   * proceed as the existing account instead of surfacing a dead end. */
+  function isAlreadyExistsError(err) {
+    if (!err) return false;
+    if (err.code === 409) return true;
+    if (/already_exists/i.test(String(err.type || ""))) return true;
+    return /already exists|duplicate|unique/i.test(errMessage(err));
+  }
+  /* A session is already active: Appwrite refuses to create another one
+   * ("Creation of a session is prohibited when a session is active.").
+   * Detected by message/type only — a bare 401 can also mean bad
+   * credentials, which must NOT be treated as session-active. */
+  function isSessionActiveError(err) {
+    if (!err) return false;
+    if (/session_already_exists|session.*active/i.test(String(err.type || ""))) return true;
+    return /session is active|session already exists|prohibited when a session is active/i.test(errMessage(err));
+  }
+
+  function makeLiveStore(servicesOrClient) {
+    const svc = resolveServices(servicesOrClient);
+    const account = svc.account;
+    const tables = svc.tables;
+    const storage = svc.storage;
+    const functionsSvc = svc.functions;
+    const Q = svc.Query;
+    const Perm = svc.Permission;
+    const Role = svc.Role;
+    const ID = svc.ID;
+
+    const readAny = () => Perm.read(Role.any());
+    const readUser = (id) => Perm.read(Role.user(id));
+    const readTeam = () => Perm.read(Role.team("admins"));
+    const updateUser = (id) => Perm.update(Role.user(id));
+    const updateTeam = () => Perm.update(Role.team("admins"));
+    const deleteUser = (id) => Perm.delete(Role.user(id));
+    const deleteTeam = () => Perm.delete(Role.team("admins"));
+
+    /* Row normalisation: $id -> id, $createdAt -> created_at,
+     * $updatedAt -> updated_at; system fields are dropped. */
+    const norm = (doc) => {
+      if (!doc || typeof doc !== "object") return doc;
+      const out = {};
+      Object.keys(doc).forEach((k) => {
+        if (k === "$permissions" || k === "$databaseId" || k === "$tableId" || k === "$sequence") return;
+        if (k === "$id") out.id = doc[k];
+        else if (k === "$createdAt") out.created_at = doc[k];
+        else if (k === "$updatedAt") out.updated_at = doc[k];
+        else out[k] = doc[k];
+      });
+      return out;
+    };
+
+    /* A stored file ID (flat, no slash, no scheme) becomes a plain
+     * file-view URL the frozen renderers can use verbatim as <video>/<img>
+     * src. Data URLs, http(s) URLs, relative asset paths and the demo
+     * placeholders pass through untouched. */
+    const looksLikeFileId = (v) => typeof v === "string" && v.length > 0 && v.length <= 36 && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(v);
+    const fileViewUrl = (fileId) => {
+      try {
+        if (storage && typeof storage.getFileView === "function") {
+          return storage.getFileView({ bucketId: MEDIA_BUCKET, fileId });
+        }
+      } catch (e) { /* fall through: keep the raw id */ }
+      return fileId;
+    };
+    const playable = (value) => (looksLikeFileId(value) ? fileViewUrl(value) : value);
+    const mapMediaFields = (row) => {
+      if (row.storage_path !== undefined && looksLikeFileId(row.storage_path)) {
+        row.storage_file_id = row.storage_path;
+        row.storage_path = fileViewUrl(row.storage_path);
+      }
+      if (row.thumbnail_path !== undefined && looksLikeFileId(row.thumbnail_path)) {
+        row.thumbnail_file_id = row.thumbnail_path;
+        row.thumbnail_path = fileViewUrl(row.thumbnail_path);
+      }
+      return row;
+    };
+    /* Decomposed poll attributes -> the { question, options } shape the
+     * frozen UI reads (v.poll.question / v.poll.options). */
+    const mapVideo = (doc) => {
+      const row = mapMediaFields(norm(doc));
+      if (row.poll_question) {
+        row.poll = { question: row.poll_question, options: [row.poll_option_a || "", row.poll_option_b || ""] };
+      } else {
+        row.poll = null;
+      }
+      return row;
+    };
+    const mapStory = (doc) => mapMediaFields(norm(doc));
+    const mapRow = (doc) => norm(doc);
+
+    async function listRows(table, queries, wantTotal) {
+      const res = await tables.listRows({ databaseId: APPWRITE_DB, tableId: table, queries: queries || [], total: !!wantTotal });
+      const rows = (res && res.rows) || (res && res.documents) || [];
+      return { rows, total: res ? res.total : undefined };
+    }
+    async function listMapped(table, queries, mapper) {
+      const { rows } = await listRows(table, queries || []);
+      return rows.map(mapper || mapRow);
+    }
+    /* maybeSingle equivalent: first row or null, never throws on empty. */
+    async function one(table, queries, mapper) {
+      const { rows } = await listRows(table, (queries || []).concat([Q.limit(1)]));
+      if (!rows.length) return null;
+      return (mapper || mapRow)(rows[0]);
+    }
+    async function getOrNull(table, rowId, mapper) {
+      try {
+        const doc = await tables.getRow({ databaseId: APPWRITE_DB, tableId: table, rowId });
+        return (mapper || mapRow)(doc);
+      } catch (e) {
+        if (isNotFound(e)) return null;
+        throw e;
+      }
+    }
+    async function getQuiet(table, rowId, mapper) {
+      try { return await getOrNull(table, rowId, mapper); } catch (e) { return null; }
+    }
+    async function countRows(table, queries) {
+      const { rows, total } = await listRows(table, (queries || []).concat([Q.limit(1)]), true);
+      if (typeof total === "number") return total;
+      return rows.length;
+    }
+    async function deleteRowLenient(table, rowId) {
+      try { await tables.deleteRow({ databaseId: APPWRITE_DB, tableId: table, rowId }); } catch (e) { if (!isNotFound(e)) throw e; }
+    }
+    /* IN-style list: Query.equal(attribute, values) first; if the server
+     * rejects the array form, fall back to the base query + JS filtering. */
+    async function listIn(table, attribute, values, extraQueries, mapper) {
+      const vals = values || [];
+      if (!vals.length) return [];
+      try {
+        return await listMapped(table, (extraQueries || []).concat([Q.equal(attribute, vals), Q.limit(100)]), mapper);
+      } catch (e) {
+        const all = await listMapped(table, (extraQueries || []).concat([Q.limit(100)]), mapper);
+        const keyOf = (r) => (attribute === "$id" ? r.id : r[attribute]);
+        return all.filter((r) => vals.indexOf(keyOf(r)) !== -1);
+      }
+    }
+
+    async function getPublicProfiles(ids) {
+      const list = (ids || []).filter(Boolean);
+      if (!list.length) return {};
+      try {
+        const rows = await listIn("public_profiles", "$id", list, [], mapRow);
+        const byId = {};
+        rows.forEach((r) => { byId[r.id] = r; });
+        const missing = list.filter((id) => !byId[id]);
+        for (const id of missing) {
+          const oneRow = await getQuiet("public_profiles", id, mapRow);
+          if (oneRow) byId[id] = oneRow;
+        }
+        return byId;
+      } catch (e) {
+        const byId = {};
+        for (const id of list) {
+          const oneRow = await getQuiet("public_profiles", id, mapRow);
+          if (oneRow) byId[id] = oneRow;
+        }
+        return byId;
+      }
+    }
+    const slugToCategoryId = (slug) => {
+      const specIdx = SPEC_CATEGORY_SLUGS.indexOf(slug);
+      if (specIdx !== -1) return specIdx + 1;
+      const found = CATEGORIES.find((c) => c.slug === slug);
+      return found ? found.id : null;
+    };
+    const categoryIdToSlug = (id) => {
+      const n = Number(id);
+      if (n >= 1 && n <= SPEC_CATEGORY_SLUGS.length) return SPEC_CATEGORY_SLUGS[n - 1];
+      const found = CATEGORIES.find((c) => c.id === n);
+      return found ? found.slug : null;
+    };
+    async function attachCategories(videos) {
+      if (!videos.length) return videos;
+      const ids = videos.map((v) => v.id);
+      let links = [];
+      try {
+        links = await listIn("video_categories", "video_id", ids, [], mapRow);
+      } catch (e) { links = []; }
+      const byVideo = {};
+      links.forEach((l) => {
+        const num = slugToCategoryId(l.category_id);
+        if (num === null) return;
+        (byVideo[l.video_id] = byVideo[l.video_id] || []).push(num);
+      });
+      videos.forEach((v) => { v.category_ids = byVideo[v.id] || []; });
+      return videos;
+    }
+
+    /* Public-video loader: the client-side reproduction of the old
+     * public_videos view (spec §6.2). Base query (approved + public) +
+     * profile join + post-filters in spec order (no public profile ->
+     * drop; private-account rule; blocked rule) + category/poll mapping.
+     * `viewerId` null means guest: private-account creators are dropped. */
+    async function loadPublicVideos(opts) {
+      const queries = (opts.queries || []).slice();
+      const limit = opts.limit || 30;
+      queries.push(Q.limit(limit));
+      const { rows } = await listRows("videos", queries);
+      let videos = rows.map(mapVideo);
+      /* Deterministic published_at-desc with $createdAt fallback, as the
+       * spec prescribes, when the caller asked for published ordering. */
+      if (opts.publishedOrder) {
+        videos.sort((a, b) => {
+          const ka = a.published_at || a.created_at || "";
+          const kb = b.published_at || b.created_at || "";
+          return ka < kb ? 1 : ka > kb ? -1 : 0;
+        });
+      }
+      const creatorIds = [...new Set(videos.map((v) => v.creator_id).filter(Boolean))];
+      const profilesById = await getPublicProfiles(creatorIds);
+      videos.forEach((v) => {
+        const p = profilesById[v.creator_id];
+        v.username = p ? p.username : "unknown";
+        v.display_name = p ? p.display_name : "";
+        v.avatar_url = p ? p.avatar_url : "";
+        v.verified = !!(p && p.verified);
+        v._profile = p || null;
+      });
+      /* Post-filter 1: no public profile (suspended creator) -> drop. */
+      videos = videos.filter((v) => !!v._profile);
+      /* Post-filter 2: private-account rule. */
+      const privateOnes = videos.filter((v) => v._profile.private_account && v.creator_id !== opts.viewerId);
+      if (privateOnes.length) {
+        let allowed = new Set();
+        if (opts.viewerId) {
+          const privateIds = [...new Set(privateOnes.map((v) => v.creator_id))];
+          try {
+            const fols = await listIn("follows", "following_id", privateIds, [Q.equal("follower_id", opts.viewerId)], mapRow);
+            allowed = new Set(fols.map((f) => f.following_id));
+          } catch (e) { allowed = new Set(); }
+        }
+        videos = videos.filter((v) => !(v._profile.private_account && v.creator_id !== opts.viewerId && !allowed.has(v.creator_id)));
+      }
+      /* Post-filter 3: blocked rule (drop creators the viewer blocked). */
+      if (opts.viewerId && videos.length) {
+        try {
+          const blocks = await listIn("blocked_users", "blocked_id", creatorIds, [Q.equal("blocker_id", opts.viewerId)], mapRow);
+          const blocked = new Set(blocks.map((b) => b.blocked_id));
+          if (blocked.size) videos = videos.filter((v) => !blocked.has(v.creator_id));
+        } catch (e) { /* blocking filter is best-effort */ }
+      }
+      videos.forEach((v) => { delete v._profile; });
+      if (opts.attachCategories) await attachCategories(videos);
+      if (opts.slice) videos = videos.slice(0, opts.slice);
+      return videos;
+    }
+
+    /* Function execution: bodies are always sent as JSON strings; the
+     * response body is parsed back. A failed execution, an HTTP error
+     * status, or an { error } payload all throw an Error. */
+    async function execFunction(functionId, payload) {
+      let execution;
+      try {
+        execution = await functionsSvc.createExecution({ functionId, body: JSON.stringify(payload || {}) });
+      } catch (e) { throw asError(e); }
+      const status = execution && execution.status;
+      const httpStatus = execution && (execution.responseStatusCode || execution.response_status_code);
+      let body = execution && (execution.responseBody !== undefined ? execution.responseBody : execution.response);
+      if (typeof body === "string") {
+        const trimmed = body.trim();
+        if (trimmed) { try { body = JSON.parse(trimmed); } catch (e) { /* keep the raw string */ } }
+        else body = null;
+      }
+      if (status === "failed" || (typeof httpStatus === "number" && httpStatus >= 400)) {
+        const msg = (body && body.error) || (body && body.message) || ("Function " + functionId + " failed.");
+        throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
+      }
+      if (body && typeof body === "object" && body.error) throw new Error(String(body.error));
+      return body;
+    }
+    async function callApi(action, params) {
+      return execFunction(API_FUNCTION, Object.assign({ action }, params || {}));
+    }
+    function extractPrefs(result) {
+      /* callApi returns the { ok, data } envelope: the gate values live
+       * in result.data. The direct-row and { prefs } shapes are kept
+       * as fallbacks. */
+      const src = (result && result.data) || (result && result.prefs) || result || {};
+      const d = { allow_comment: "everyone", allow_mention: "everyone", allow_like: "everyone", allow_download: "everyone", view_follow_list: "everyone" };
+      ["allow_comment", "allow_mention", "allow_like", "allow_download", "view_follow_list"].forEach((k) => {
+        if (typeof src[k] === "string") d[k] = src[k];
+      });
+      return d;
+    }
+
+    /* Best-effort own-profile lookup (role only, for the sound
+     * source_type label). Never throws: callers default to "user". */
+    async function fetchMyProfile() {
+      try {
+        const u = await account.get();
+        const uid2 = u && (u.$id || u.id);
+        if (!uid2) return null;
+        return await getOrNull("profiles", uid2, mapRow);
+      } catch (e) { return null; }
+    }
+
+    /* Cross-user grants (a document carrying another user's read, or the
+     * team's read) must be verified live (spec §5.10/§5.11/§5.19, risk R5).
+     * Notifications and reports therefore try the direct create first and
+     * fall back to the api function's notify / file-report actions, which
+     * create the same document with the API key. Best-effort callers pass
+     * { swallow: true } and never see either failure. */
+    async function createNotification(data, permissions, opts) {
+      const swallow = !!(opts && opts.swallow);
+      try {
+        await tables.createRow({ databaseId: APPWRITE_DB, tableId: "notifications", rowId: ID.unique(), data, permissions });
+        return true;
+      } catch (directErr) {
+        try {
+          await callApi("notify", { user_id: data.user_id, type: data.type, actor_id: data.actor_id || null, video_id: data.video_id || null, comment_id: data.comment_id || null });
+          return true;
+        } catch (fallbackErr) {
+          if (swallow) return false;
+          throw asError(directErr);
+        }
+      }
+    }
+    async function createReport(data, permissions) {
+      try {
+        await tables.createRow({ databaseId: APPWRITE_DB, tableId: "reports", rowId: ID.unique(), data, permissions });
+        return true;
+      } catch (directErr) {
+        try {
+          await callApi("file-report", { target_type: data.target_type, target_id: data.target_id, reason: data.reason });
+          return true;
+        } catch (fallbackErr) {
+          throw asError(directErr);
+        }
+      }
+    }
+
     const enrichLive = async (rows, me) => {
-      const list = (rows || []).map(pub);
+      const list = (rows || []).slice();
       try {
         const duetIds = [...new Set(list.filter((v) => v.duet_of).map((v) => v.duet_of))];
         if (duetIds.length) {
-          const { data: srcs } = await sb.from("public_videos").select("*").in("id", duetIds);
-          const byId = Object.fromEntries((srcs || []).map((x) => [x.id, x]));
+          let srcs = [];
+          try {
+            srcs = await loadPublicVideos({ queries: [Q.equal("$id", duetIds)], limit: duetIds.length, viewerId: me });
+          } catch (e) {
+            /* $id IN-query fallback: fetch duet sources one by one. */
+            for (const id of duetIds) {
+              const oneSrc = await getQuiet("videos", id, mapVideo);
+              if (oneSrc) srcs.push(oneSrc);
+            }
+            const profById = await getPublicProfiles(srcs.map((s) => s.creator_id)).catch(() => ({}));
+            srcs.forEach((s) => {
+              const p = profById[s.creator_id];
+              s.username = p ? p.username : "unknown";
+              s.display_name = p ? p.display_name : "";
+              s.avatar_url = p ? p.avatar_url : "";
+              s.verified = !!(p && p.verified);
+            });
+          }
+          const byId = Object.fromEntries(srcs.map((x) => [x.id, x]));
           list.forEach((v) => { const s2 = v.duet_of && byId[v.duet_of]; if (s2) v.duet_source = { id: s2.id, storage_path: s2.storage_path, thumbnail_path: s2.thumbnail_path, creator_id: s2.creator_id, username: s2.username, display_name: s2.display_name }; });
         }
         const rcIds = [...new Set(list.filter((v) => v.reply_comment_id).map((v) => v.reply_comment_id))];
         if (rcIds.length) {
-          const { data: cs } = await sb.from("comments").select("id, body, video_id").in("id", rcIds);
-          const byId = Object.fromEntries((cs || []).map((x) => [x.id, x]));
+          const cs = await listIn("comments", "$id", rcIds, [], mapRow);
+          const byId = Object.fromEntries(cs.map((x) => [x.id, x]));
           list.forEach((v) => { const c = v.reply_comment_id && byId[v.reply_comment_id]; if (c) v.reply_comment = { id: c.id, body: c.body, username: "", video_id: c.video_id }; });
         }
         const pollIds = list.filter((v) => v.poll).map((v) => v.id);
         if (pollIds.length) {
-          const { data: votes } = await sb.from("poll_votes").select("video_id, user_id, choice").in("video_id", pollIds);
+          const votes = await listIn("poll_votes", "video_id", pollIds, [Q.limit(100)], mapRow);
           list.forEach((v) => {
             if (!v.poll) return;
-            const vs = (votes || []).filter((x) => x.video_id === v.id);
+            const vs = votes.filter((x) => x.video_id === v.id);
             const counts = [0, 0]; vs.forEach((x) => { counts[x.choice] = (counts[x.choice] || 0) + 1; });
             const mine = me ? vs.find((x) => x.user_id === me) : null;
             v.poll_state = { counts, total: vs.length, my: mine ? mine.choice : null };
@@ -720,31 +1383,95 @@
       } catch (e) { /* enrichment is best-effort */ }
       return list;
     };
+    /* Session hygiene for auth: a half-finished signup (account +
+     * session created, profile creation failed) leaves a live session
+     * behind, and Appwrite then refuses the next session creation.
+     * clearStaleSession drops a pre-existing session before signup;
+     * createSessionWithRetry deletes + retries exactly once when the
+     * server reports a session already active. */
+    async function clearStaleSession() {
+      let active = false;
+      try { const u = await account.get(); active = !!(u && (u.$id || u.id)); } catch (e) { active = false; }
+      if (!active) return;
+      try { await account.deleteSession({ sessionId: "current" }); } catch (e) { /* already gone */ }
+    }
+    async function dropCurrentSession() {
+      try { await account.deleteSession({ sessionId: "current" }); } catch (e) { /* already gone */ }
+    }
+    async function createSessionWithRetry(email, password) {
+      try {
+        await account.createEmailPasswordSession({ email, password });
+      } catch (e) {
+        if (isSessionActiveError(e)) {
+          await dropCurrentSession();
+          await account.createEmailPasswordSession({ email, password });
+        } else { throw e; }
+      }
+    }
+
     return {
       mode: "live",
       async signUp(email, password, username) {
-        const { data, error } = await sb.auth.signUp({ email, password });
-        if (error) throw error;
-        if (!data.user) throw new Error("Check your email to verify your account, then log in.");
-        const { error: e2 } = await sb.from("profiles").insert({ id: data.user.id, username: String(username).toLowerCase(), display_name: username });
-        if (e2) throw e2;
-        return data.user;
+        /* Account creation does not log the user in, so a session is
+         * created explicitly and the profile is then created by the api
+         * function (never by a direct client insert: the function forces
+         * role="user" and validates the username — spec §5.1/J3).
+         * A stale session from an earlier half-finished attempt is
+         * cleared first, and an already-existing account proceeds to
+         * session creation instead of erroring out. */
+        await clearStaleSession();
+        let created = null;
+        try {
+          created = await account.create({ userId: ID.unique(), email, password, name: String(username || "") });
+        } catch (e) {
+          if (!isAlreadyExistsError(e)) throw asError(e);
+        }
+        try {
+          await createSessionWithRetry(email, password);
+        } catch (e) {
+          if (/verif/i.test(errMessage(e))) throw new Error("Check your email to verify your account, then log in.");
+          throw asError(e);
+        }
+        const uname = String(username || "").toLowerCase();
+        try {
+          await callApi("create-profile", { username: uname, display_name: String(username || "") });
+        } catch (e) { throw asError(e); }
+        let authUser = created;
+        if (!authUser) { try { authUser = await account.get(); } catch (e) { authUser = null; } }
+        authUser = authUser || {};
+        return { id: authUser.$id || authUser.id, email: authUser.email || email, name: authUser.name || String(username || "") };
       },
       async logIn(email, password) {
-        const { data, error } = await sb.auth.signInWithPassword({ email, password });
-        if (error) throw error;
+        try {
+          await createSessionWithRetry(email, password);
+        } catch (e) { throw asError(e); }
         return this.currentUser();
       },
-      async logOut() { await sb.auth.signOut(); },
+      async logOut() {
+        /* Idempotent: signing out with no session must not throw, or the
+         * caller's reload/logout flow never runs. */
+        try { await account.deleteSession({ sessionId: "current" }); } catch (e) { /* already signed out */ }
+      },
       async currentUser() {
-        const { data } = await sb.auth.getUser();
-        if (!data.user) return null;
-        const { data: p } = await sb.from("profiles").select("*").eq("id", data.user.id).single();
-        return p;
+        let authUser;
+        try { authUser = await account.get(); } catch (e) { return null; }
+        if (!authUser || !authUser.$id) return null;
+        try {
+          const p = await getOrNull("profiles", authUser.$id, mapRow);
+          return p;
+        } catch (e) { return null; }
       },
       async usernameAvailable(username) {
-        const { data } = await sb.from("public_profiles").select("id").eq("username", String(username).toLowerCase()).maybeSingle();
-        return !data;
+        /* Format first (same rule as demo): an invalid name is never
+         * "available". A genuine empty result means available; any
+         * query failure (database/table missing, network, permissions)
+         * THROWS so the UI can say the check failed instead of lying
+         * that every name is available. one() returns null on empty
+         * and never throws for "no rows". */
+        const u = String(username || "").trim().toLowerCase();
+        if (!/^[a-z0-9_.]{3,24}$/.test(u)) return false;
+        const row = await one("public_profiles", [Q.equal("username", u)], mapRow);
+        return !row;
       },
       async updateProfile(me, patch) {
         const clean = {};
@@ -757,211 +1484,257 @@
         if (patch.bio !== undefined) clean.bio = String(patch.bio).slice(0, 160);
         if (patch.website !== undefined) clean.website = String(patch.website).trim().slice(0, 200);
         if (patch.avatar_url !== undefined) clean.avatar_url = patch.avatar_url;
-        const { data, error } = await sb.from("profiles").update(clean).eq("id", me).select().single();
-        if (error) throw new Error(/unique|duplicate/i.test(error.message) ? "That username is taken." : error.message);
-        return data;
+        try {
+          const doc = await tables.updateRow({ databaseId: APPWRITE_DB, tableId: "profiles", rowId: me, data: clean });
+          return mapRow(doc);
+        } catch (e) {
+          const msg = errMessage(e);
+          throw new Error((e.code === 409 || /unique|duplicate|already exists/i.test(msg)) ? "That username is taken." : msg);
+        }
       },
       async setPreferences(me, categoryIds) {
-        const { error } = await sb.from("user_preferences").upsert({ user_id: me, category_ids: categoryIds });
-        if (error) throw error;
+        /* Category IDs are numbers in the UI and slugs in the database
+         * (spec J4). Translate at this boundary in both directions. */
+        const slugs = (categoryIds || []).map((c) => (typeof c === "string" && CATEGORIES.some((x) => x.slug === c) ? c : categoryIdToSlug(c))).filter(Boolean);
+        try {
+          await tables.upsertRow({ databaseId: APPWRITE_DB, tableId: "user_preferences", rowId: ID.custom(me), data: { user_id: me, category_ids: slugs }, permissions: [readUser(me), updateUser(me), deleteUser(me)] });
+        } catch (e) { throw asError(e); }
       },
       async getPreferences(me) {
-        const { data } = await sb.from("user_preferences").select("category_ids").eq("user_id", me).maybeSingle();
-        return { category_ids: (data && data.category_ids) || [] };
+        const row = await one("user_preferences", [Q.equal("user_id", me)], mapRow).catch(() => null);
+        const slugs = (row && row.category_ids) || [];
+        const ids = slugs.map((s) => slugToCategoryId(s)).filter((n) => n !== null);
+        return { category_ids: ids };
       },
       async feed(me, kind) {
-        let q = sb.from("public_videos").select("*").order("published_at", { ascending: false }).limit(30);
+        const queries = [Q.equal("moderation_status", "approved"), Q.equal("visibility", "public"), Q.orderDesc("published_at")];
         if (kind === "following" && me) {
-          const { data: fol } = await sb.from("follows").select("following_id").eq("follower_id", me);
-          const ids = (fol || []).map((f) => f.following_id);
+          const fol = await listMapped("follows", [Q.equal("follower_id", me), Q.limit(100)], mapRow);
+          const ids = fol.map((f) => f.following_id);
           if (!ids.length) return [];
-          q = q.in("creator_id", ids);
+          queries.push(Q.equal("creator_id", ids));
         }
-        const { data, error } = await q; if (error) throw error;
-        return enrichLive(data || [], me);
+        /* Over-fetch to 50, post-filter, then slice to 30 (spec §6.2). */
+        const videos = await loadPublicVideos({ queries, limit: 50, viewerId: me || null, publishedOrder: true, attachCategories: true, slice: 30 });
+        return enrichLive(videos, me);
       },
       async myVideos(me) {
-        const { data, error } = await sb.from("videos").select("*").eq("creator_id", me).order("created_at", { ascending: false });
-        if (error) throw error; return data;
+        const rows = await listMapped("videos", [Q.equal("creator_id", me), Q.orderDesc("$createdAt"), Q.limit(100)], mapVideo);
+        return rows;
       },
-      async profileVideos(userId) {
-        const { data, error } = await sb.from("public_videos").select("*").eq("creator_id", userId).order("published_at", { ascending: false });
-        if (error) throw error; return data;
+      async profileVideos(userId, me) {
+        const videos = await loadPublicVideos({ queries: [Q.equal("creator_id", userId), Q.orderDesc("published_at")], limit: 100, viewerId: me || null, publishedOrder: true });
+        return videos;
       },
       async getProfile(userId) {
-        const { data } = await sb.from("public_profiles").select("*").eq("id", userId).maybeSingle();
-        return data;
+        return getQuiet("public_profiles", userId, mapRow);
       },
       async socialCounts(userId) {
         const [f1, f2, v] = await Promise.all([
-          sb.from("follows").select("*", { count: "exact", head: true }).eq("following_id", userId),
-          sb.from("follows").select("*", { count: "exact", head: true }).eq("follower_id", userId),
-          sb.from("public_videos").select("*", { count: "exact", head: true }).eq("creator_id", userId),
+          countRows("follows", [Q.equal("following_id", userId)]),
+          countRows("follows", [Q.equal("follower_id", userId)]),
+          countRows("videos", [Q.equal("creator_id", userId), Q.equal("moderation_status", "approved"), Q.equal("visibility", "public")]),
         ]);
-        return { followers: f1.count || 0, following: f2.count || 0, videos: v.count || 0 };
+        return { followers: f1 || 0, following: f2 || 0, videos: v || 0 };
       },
       async isFollowing(me, userId) {
-        const { data } = await sb.from("follows").select("follower_id").eq("follower_id", me).eq("following_id", userId).maybeSingle();
-        return !!data;
+        const row = await one("follows", [Q.equal("follower_id", me), Q.equal("following_id", userId)], mapRow).catch(() => null);
+        return !!row;
       },
       async profileStats(userId, me) {
         const [fr, fg, fl] = await Promise.all([
-          sb.from("follows").select("*", { count: "exact", head: true }).eq("following_id", userId),
-          sb.from("follows").select("*", { count: "exact", head: true }).eq("follower_id", userId),
-          me ? sb.from("follows").select("follower_id").eq("follower_id", me).eq("following_id", userId).maybeSingle() : Promise.resolve({ data: null }),
+          countRows("follows", [Q.equal("following_id", userId)]),
+          countRows("follows", [Q.equal("follower_id", userId)]),
+          me ? one("follows", [Q.equal("follower_id", me), Q.equal("following_id", userId)], mapRow).catch(() => null) : Promise.resolve(null),
         ]);
-        return { followers: fr.count || 0, following: fg.count || 0, is_following: !!(fl && fl.data) };
+        return { followers: fr || 0, following: fg || 0, is_following: !!fl };
       },
       async toggleFollow(me, userId) {
-        if (await this.isFollowing(me, userId)) { await sb.from("follows").delete().eq("follower_id", me).eq("following_id", userId); return false; }
-        const { error } = await sb.from("follows").insert({ follower_id: me, following_id: userId });
-        if (error) throw error; return true;
+        if (me === userId) throw new Error("You cannot follow yourself.");
+        const existing = await one("follows", [Q.equal("follower_id", me), Q.equal("following_id", userId)], mapRow).catch(() => null);
+        if (existing) { await deleteRowLenient("follows", existing.id); return false; }
+        try {
+          await tables.createRow({ databaseId: APPWRITE_DB, tableId: "follows", rowId: ID.unique(), data: { follower_id: me, following_id: userId }, permissions: [readAny(), deleteUser(me)] });
+        } catch (e) { throw asError(e); }
+        return true;
       },
       async likedIds(me) {
-        const { data } = await sb.from("video_likes").select("video_id").eq("user_id", me);
-        return new Set((data || []).map((x) => x.video_id));
+        const rows = await listMapped("video_likes", [Q.equal("user_id", me), Q.limit(100)], mapRow);
+        return new Set(rows.map((x) => x.video_id));
       },
       async toggleLike(me, videoId) {
-        const { data } = await sb.from("video_likes").select("video_id").eq("user_id", me).eq("video_id", videoId).maybeSingle();
-        if (data) { await sb.from("video_likes").delete().eq("user_id", me).eq("video_id", videoId); return false; }
-        const { data: v } = await sb.from("videos").select("creator_id").eq("id", videoId).single();
+        const existing = await one("video_likes", [Q.equal("user_id", me), Q.equal("video_id", videoId)], mapRow).catch(() => null);
+        if (existing) { await deleteRowLenient("video_likes", existing.id); return false; }
+        const v = await getQuiet("videos", videoId, mapRow);
         if (v && v.creator_id !== me) {
           const lp = await this.getAllowPrefs(v.creator_id);
           if (lp.allow_like === "nobody") throw new Error("Likes are turned off for this video.");
           if (lp.allow_like === "followers") {
-            const { data: f } = await sb.from("follows").select("follower_id").eq("follower_id", me).eq("following_id", v.creator_id).maybeSingle();
+            const f = await one("follows", [Q.equal("follower_id", me), Q.equal("following_id", v.creator_id)], mapRow).catch(() => null);
             if (!f) throw new Error("Only followers can like this video.");
           }
         }
-        const { error } = await sb.from("video_likes").insert({ user_id: me, video_id: videoId });
-        if (error) throw error; return true;
+        try {
+          await tables.createRow({ databaseId: APPWRITE_DB, tableId: "video_likes", rowId: ID.unique(), data: { user_id: me, video_id: videoId }, permissions: [readAny(), deleteUser(me)] });
+        } catch (e) { throw asError(e); }
+        return true;
       },
       async savedIds(me) {
-        const { data } = await sb.from("saved_videos").select("video_id").eq("user_id", me);
-        return new Set((data || []).map((x) => x.video_id));
+        const rows = await listMapped("saved_videos", [Q.equal("user_id", me), Q.limit(100)], mapRow);
+        return new Set(rows.map((x) => x.video_id));
       },
       async toggleSave(me, videoId) {
-        const { data } = await sb.from("saved_videos").select("video_id").eq("user_id", me).eq("video_id", videoId).maybeSingle();
-        if (data) { await sb.from("saved_videos").delete().eq("user_id", me).eq("video_id", videoId); return false; }
-        const { error } = await sb.from("saved_videos").insert({ user_id: me, video_id: videoId });
-        if (error) throw error; return true;
+        const existing = await one("saved_videos", [Q.equal("user_id", me), Q.equal("video_id", videoId)], mapRow).catch(() => null);
+        if (existing) { await deleteRowLenient("saved_videos", existing.id); return false; }
+        try {
+          await tables.createRow({ databaseId: APPWRITE_DB, tableId: "saved_videos", rowId: ID.unique(), data: { user_id: me, video_id: videoId }, permissions: [readUser(me), deleteUser(me)] });
+        } catch (e) { throw asError(e); }
+        return true;
       },
       async savedVideos(me) {
-        const { data } = await sb.from("saved_videos").select("video_id").eq("user_id", me);
-        const ids = (data || []).map((x) => x.video_id);
+        const rows = await listMapped("saved_videos", [Q.equal("user_id", me), Q.limit(100)], mapRow);
+        const ids = rows.map((x) => x.video_id);
         if (!ids.length) return [];
-        const { data: vids } = await sb.from("public_videos").select("*").in("id", ids);
-        return vids || [];
+        return loadPublicVideos({ queries: [Q.equal("$id", ids)], limit: ids.length, viewerId: me });
       },
       async myPrivateVideos(me) {
-        const { data } = await sb.from("videos").select("*").eq("creator_id", me).eq("visibility", "private").order("created_at", { ascending: false });
-        return data || [];
+        return listMapped("videos", [Q.equal("creator_id", me), Q.equal("visibility", "private"), Q.orderDesc("$createdAt"), Q.limit(100)], mapVideo);
       },
       async likedVideos(me) {
-        const { data } = await sb.from("video_likes").select("video_id").eq("user_id", me);
-        const ids = (data || []).map((x) => x.video_id);
+        const rows = await listMapped("video_likes", [Q.equal("user_id", me), Q.limit(100)], mapRow);
+        const ids = rows.map((x) => x.video_id);
         if (!ids.length) return [];
-        const { data: vids } = await sb.from("public_videos").select("*").in("id", ids);
-        return vids || [];
+        return loadPublicVideos({ queries: [Q.equal("$id", ids)], limit: ids.length, viewerId: me });
       },
       async recordView(videoId, me) {
-        try { await sb.rpc("increment_video_view", { p_video_id: videoId }); } catch (e) {}
-        if (me) { try { await sb.from("watch_history").upsert({ user_id: me, video_id: videoId, watched_at: new Date().toISOString() }, { onConflict: "user_id,video_id" }); } catch (e) {} }
+        /* Best-effort throughout: a failed view count must never break
+         * playback. The function increments only approved videos. */
+        try { await callApi("increment-view", { video_id: videoId }); } catch (e) {}
+        if (me) {
+          try {
+            const existing = await one("watch_history", [Q.equal("user_id", me), Q.equal("video_id", videoId)], mapRow).catch(() => null);
+            const watchedAt = new Date().toISOString();
+            if (existing) {
+              await tables.updateRow({ databaseId: APPWRITE_DB, tableId: "watch_history", rowId: existing.id, data: { watched_at: watchedAt } });
+            } else {
+              try {
+                await tables.createRow({ databaseId: APPWRITE_DB, tableId: "watch_history", rowId: ID.unique(), data: { user_id: me, video_id: videoId, watched_at: watchedAt }, permissions: [readUser(me), updateUser(me), deleteUser(me)] });
+              } catch (e) {
+                /* 409 (unique index race) means the row exists now: update it. */
+                if (e.code === 409 || /unique|duplicate|already exists/i.test(errMessage(e))) {
+                  const retry = await one("watch_history", [Q.equal("user_id", me), Q.equal("video_id", videoId)], mapRow).catch(() => null);
+                  if (retry) await tables.updateRow({ databaseId: APPWRITE_DB, tableId: "watch_history", rowId: retry.id, data: { watched_at: watchedAt } });
+                } else throw e;
+              }
+            }
+          } catch (e) {}
+        }
       },
       async myWatchHistory(me) {
-        const { data } = await sb.from("watch_history").select("*").eq("user_id", me).order("watched_at", { ascending: false }).limit(100);
-        if (!data || !data.length) return [];
-        const { data: vids } = await sb.from("public_videos").select("*").in("id", data.map((h) => h.video_id));
-        const byId = Object.fromEntries((vids || []).map((v) => [v.id, v]));
-        return data.map((h) => byId[h.video_id] ? { ...byId[h.video_id], watched_at: h.watched_at } : null).filter(Boolean);
+        const hist = await listMapped("watch_history", [Q.equal("user_id", me), Q.orderDesc("watched_at"), Q.limit(100)], mapRow);
+        if (!hist.length) return [];
+        const vids = await loadPublicVideos({ queries: [Q.equal("$id", hist.map((h) => h.video_id))], limit: hist.length, viewerId: me });
+        const byId = Object.fromEntries(vids.map((v) => [v.id, v]));
+        return hist.map((h) => (byId[h.video_id] ? Object.assign({}, byId[h.video_id], { watched_at: h.watched_at }) : null)).filter(Boolean);
       },
       async myComments(me) {
-        const { data } = await sb.from("comments").select("*").eq("user_id", me).order("created_at", { ascending: false }).limit(100);
-        if (!data || !data.length) return [];
-        const { data: vids } = await sb.from("public_videos").select("id,caption,thumbnail_path,username").in("id", data.map((c) => c.video_id));
-        const byId = Object.fromEntries((vids || []).map((v) => [v.id, v]));
-        return data.map((c) => ({ ...c, video_caption: byId[c.video_id] ? byId[c.video_id].caption : "", video_thumbnail: byId[c.video_id] ? byId[c.video_id].thumbnail_path : "", video_creator: byId[c.video_id] ? byId[c.video_id].username : "" }));
+        const cs = await listMapped("comments", [Q.equal("user_id", me), Q.orderDesc("$createdAt"), Q.limit(100)], mapRow);
+        if (!cs.length) return [];
+        const vids = await loadPublicVideos({ queries: [Q.equal("$id", cs.map((c) => c.video_id))], limit: cs.length, viewerId: me });
+        const byId = Object.fromEntries(vids.map((v) => [v.id, v]));
+        return cs.map((c) => Object.assign({}, c, { video_caption: byId[c.video_id] ? byId[c.video_id].caption : "", video_thumbnail: byId[c.video_id] ? byId[c.video_id].thumbnail_path : "", video_creator: byId[c.video_id] ? byId[c.video_id].username : "" }));
       },
-      async logEvent(me, type, detail) { try { await sb.from("account_events").insert({ user_id: me, type, detail: detail || "" }); } catch (e) {} },
+      async logEvent(me, type, detail) { try { await tables.createRow({ databaseId: APPWRITE_DB, tableId: "account_events", rowId: ID.unique(), data: { user_id: me, type, detail: detail || "" }, permissions: [readUser(me)] }); } catch (e) {} },
       async myEvents(me) {
-        const { data } = await sb.from("account_events").select("*").eq("user_id", me).order("created_at", { ascending: false }).limit(50);
-        return (data || []).map((e) => ({ ...e, at: e.created_at }));
+        const rows = await listMapped("account_events", [Q.equal("user_id", me), Q.orderDesc("$createdAt"), Q.limit(50)], mapRow);
+        return rows.map((e) => Object.assign({}, e, { at: e.created_at }));
       },
       async creatorStats(me) {
-        const { data } = await sb.from("videos").select("*").eq("creator_id", me).eq("moderation_status", "approved").order("view_count", { ascending: false });
-        const { count } = await sb.from("follows").select("*", { count: "exact", head: true }).eq("following_id", me);
-        const vids = data || [];
+        const vids = await listMapped("videos", [Q.equal("creator_id", me), Q.equal("moderation_status", "approved"), Q.orderDesc("view_count"), Q.limit(100)], mapVideo);
+        const followers = await countRows("follows", [Q.equal("following_id", me)]);
         return { videos: vids, videoCount: vids.length,
           totalViews: vids.reduce((a, v) => a + (v.view_count || 0), 0),
           totalLikes: vids.reduce((a, v) => a + (v.like_count || 0), 0),
           totalComments: vids.reduce((a, v) => a + (v.comment_count || 0), 0),
-          followers: count || 0 };
+          followers: followers || 0 };
       },
       async trending() {
-        const { data } = await sb.from("public_videos").select("*").order("like_count", { ascending: false }).limit(5);
-        return data || [];
+        return loadPublicVideos({ queries: [Q.orderDesc("like_count")], limit: 5, viewerId: null });
       },
       async accountDetails(me) {
-        const { data } = await sb.from("profiles").select("*").eq("id", me).single();
+        const data = await getQuiet("profiles", me, mapRow);
         let email = "";
-        try { const u = await sb.auth.getUser(); email = (u && u.data && u.data.user && u.data.user.email) || ""; } catch (e) {}
-        return data ? { ...data, email } : null;
+        try { const u = await account.get(); email = (u && u.email) || ""; } catch (e) {}
+        return data ? Object.assign({}, data, { email }) : null;
       },
-      async setPrivateAccount(me, on) { await sb.from("profiles").update({ private_account: !!on }).eq("id", me); },
+      async setPrivateAccount(me, on) {
+        await tables.updateRow({ databaseId: APPWRITE_DB, tableId: "profiles", rowId: me, data: { private_account: !!on } });
+      },
       async getAllowPrefs(userId) {
-        const d = { allow_comment: "everyone", allow_mention: "everyone", allow_like: "everyone", allow_download: "everyone", view_follow_list: "everyone" };
-        const { data } = await sb.from("user_preferences").select("allow_comment,allow_mention,allow_like,allow_download,view_follow_list").eq("user_id", userId).maybeSingle();
-        return data ? { ...d, ...data } : d;
+        /* Preferences are owner-only, so another user's gates can only be
+         * read through the api function (spec J10). Try the function
+         * first; fall back to a direct read (own row), then to the
+         * everyone defaults — a failed prefs read defaults open, as before. */
+        try {
+          const result = await callApi("check-allow-prefs", { user_id: userId });
+          return extractPrefs(result);
+        } catch (e) { /* fall through to direct read */ }
+        try {
+          const row = await one("user_preferences", [Q.equal("user_id", userId)], mapRow);
+          if (row) return extractPrefs(row);
+        } catch (e) { /* fall through to defaults */ }
+        return extractPrefs(null);
       },
       async setAllowPref(me, key, value) {
-        await sb.from("user_preferences").upsert({ user_id: me, [key]: value }, { onConflict: "user_id" });
+        try {
+          await tables.upsertRow({ databaseId: APPWRITE_DB, tableId: "user_preferences", rowId: ID.custom(me), data: { user_id: me, [key]: value }, permissions: [readUser(me), updateUser(me), deleteUser(me)] });
+        } catch (e) { throw asError(e); }
         return this.getAllowPrefs(me);
       },
       async followList(userId, kind) {
         const col = kind === "followers" ? "following_id" : "follower_id";
         const other = kind === "followers" ? "follower_id" : "following_id";
-        const { data } = await sb.from("follows").select(other).eq(col, userId);
-        const ids = (data || []).map((r) => r[other]);
+        const rows = await listMapped("follows", [Q.equal(col, userId), Q.limit(100)], mapRow);
+        const ids = rows.map((r) => r[other]);
         if (!ids.length) return [];
-        const { data: ps } = await sb.from("public_profiles").select("*").in("id", ids);
-        return ps || [];
+        const byId = await getPublicProfiles(ids);
+        return ids.map((id) => byId[id]).filter(Boolean);
       },
       async applyForVerification(me, info) {
         const tid = String((info && info.tid) || "").trim();
         if (tid.length < 6) throw new Error("Enter the payment Transaction ID (TID).");
-        const { data: pending } = await sb.from("verification_requests").select("id").eq("user_id", me).eq("status", "pending").maybeSingle();
+        const pending = await one("verification_requests", [Q.equal("user_id", me), Q.equal("status", "pending")], mapRow).catch(() => null);
         if (pending) throw new Error("Your application is already under review.");
-        const { data, error } = await sb.from("verification_requests").insert({ user_id: me, full_name: String(info.full_name || "").slice(0, 80), category: info.category || "Creator", note: String(info.note || "").slice(0, 300), payment_method: info.method || "JazzCash", payment_tid: tid }).select().single();
-        if (error) throw error; return data;
+        const data = { user_id: me, full_name: String(info.full_name || "").slice(0, 80), category: info.category || "Creator", note: String(info.note || "").slice(0, 300), payment_method: info.method || "JazzCash", payment_tid: tid };
+        try {
+          const doc = await tables.createRow({ databaseId: APPWRITE_DB, tableId: "verification_requests", rowId: ID.unique(), data, permissions: [readUser(me), readTeam(), updateTeam(), deleteTeam()] });
+          return mapRow(doc);
+        } catch (e) { throw asError(e); }
       },
       async myVerification(me) {
-        const { data } = await sb.from("verification_requests").select("*").eq("user_id", me).order("created_at", { ascending: false }).limit(1);
-        return (data && data[0]) || null;
+        const rows = await listMapped("verification_requests", [Q.equal("user_id", me), Q.orderDesc("$createdAt"), Q.limit(1)], mapRow);
+        return rows[0] || null;
       },
       async adminVerifyRequests() {
-        const { data } = await sb.from("verification_requests").select("*").eq("status", "pending").order("created_at", { ascending: true });
-        if (!data || !data.length) return [];
-        const { data: ps } = await sb.from("public_profiles").select("id,username,display_name").in("id", data.map((r) => r.user_id));
-        const byId = Object.fromEntries((ps || []).map((x) => [x.id, x]));
-        return data.map((r) => ({ ...r, username: byId[r.user_id] ? byId[r.user_id].username : "?", display_name: byId[r.user_id] ? byId[r.user_id].display_name : "", method: r.payment_method, tid: r.payment_tid }));
+        const rows = await listMapped("verification_requests", [Q.equal("status", "pending"), Q.orderAsc("$createdAt"), Q.limit(100)], mapRow);
+        if (!rows.length) return [];
+        const byId = await getPublicProfiles(rows.map((r) => r.user_id));
+        return rows.map((r) => Object.assign({}, r, { username: byId[r.user_id] ? byId[r.user_id].username : "?", display_name: byId[r.user_id] ? byId[r.user_id].display_name : "", method: r.payment_method, tid: r.payment_tid }));
       },
       async adminDecideVerification(adminId, reqId, decision) {
         const status = decision === "approved" ? "approved" : "rejected";
-        const { data, error } = await sb.from("verification_requests").update({ status, decided_at: new Date().toISOString(), decided_by: adminId }).eq("id", reqId).select().single();
-        if (error) throw error;
-        if (status === "approved") await sb.from("profiles").update({ verified: true }).eq("id", data.user_id);
-        try { await sb.from("notifications").insert({ user_id: data.user_id, type: "system", actor_id: null, video_id: null }); } catch (e) {}
-        return data;
+        try {
+          await callApi("decide-verification", { request_id: reqId, decision: status });
+        } catch (e) { throw asError(e); }
+        const row = await getQuiet("verification_requests", reqId, mapRow);
+        if (row) return row;
+        return { id: reqId, status, decided_at: new Date().toISOString(), decided_by: adminId };
       },
       async conversations(me) {
-        const { data } = await sb.from("messages").select("*")
-          .or(`sender_id.eq.${me},recipient_id.eq.${me}`)
-          .order("created_at", { ascending: true }).limit(300);
-        const rows = data || [];
+        const rows = await listMapped("messages", [Q.or([Q.equal("sender_id", me), Q.equal("recipient_id", me)]), Q.orderAsc("$createdAt"), Q.limit(300)], mapRow);
         const ids = [...new Set(rows.map((m) => (m.sender_id === me ? m.recipient_id : m.sender_id)))];
         if (!ids.length) return [];
-        const { data: ps } = await sb.from("public_profiles").select("*").in("id", ids);
-        const byId = Object.fromEntries((ps || []).map((x) => [x.id, x]));
+        const byId = await getPublicProfiles(ids);
         const byOther = new Map();
         rows.forEach((m) => {
           const other = m.sender_id === me ? m.recipient_id : m.sender_id;
@@ -974,63 +1747,84 @@
           .sort((a, b) => (a.last.created_at < b.last.created_at ? 1 : -1));
       },
       async thread(me, otherId) {
-        const { data } = await sb.from("messages").select("*")
-          .or(`and(sender_id.eq.${me},recipient_id.eq.${otherId}),and(sender_id.eq.${otherId},recipient_id.eq.${me})`)
-          .order("created_at", { ascending: true }).limit(300);
-        return data || [];
+        return listMapped("messages", [Q.or([Q.and([Q.equal("sender_id", me), Q.equal("recipient_id", otherId)]), Q.and([Q.equal("sender_id", otherId), Q.equal("recipient_id", me)])]), Q.orderAsc("$createdAt"), Q.limit(300)], mapRow);
       },
       async sendMessage(me, otherId, body) {
         body = String(body || "").trim();
         if (!body) throw new Error("Write a message first.");
         if (body.length > 1000) throw new Error("Message is too long.");
-        const { data, error } = await sb.from("messages").insert({ sender_id: me, recipient_id: otherId, body }).select().single();
-        if (error) throw error; return data;
+        if (me === otherId) throw new Error("You cannot message yourself.");
+        /* Recipient read grant caveat (spec §5.19, risk R5): if the
+         * direct create fails with a permission error (401/403), fall
+         * back exactly once to the api `send-message` action, which
+         * creates the same document with the API key. Any other direct
+         * failure, or a failed fallback, surfaces as an error. */
+        try {
+          const doc = await tables.createRow({ databaseId: APPWRITE_DB, tableId: "messages", rowId: ID.unique(), data: { sender_id: me, recipient_id: otherId, body }, permissions: [readUser(me), readUser(otherId), updateUser(otherId)] });
+          return mapRow(doc);
+        } catch (directErr) {
+          if (!isPermissionError(directErr)) throw asError(directErr);
+          let fallbackResult;
+          try {
+            fallbackResult = await callApi("send-message", { recipient_id: otherId, body });
+          } catch (fallbackErr) {
+            throw asError(directErr);
+          }
+          const data = (fallbackResult && typeof fallbackResult === "object" && fallbackResult.data !== undefined) ? fallbackResult.data : fallbackResult;
+          const doc = (data && data.message) || data;
+          if (!doc || typeof doc !== "object" || !(doc.$id || doc.id)) throw asError(directErr);
+          return mapRow(doc);
+        }
       },
       async markThreadRead(me, otherId) {
-        await sb.from("messages").update({ is_read: true })
-          .eq("recipient_id", me).eq("sender_id", otherId).eq("is_read", false);
+        try {
+          const rows = await listMapped("messages", [Q.equal("recipient_id", me), Q.equal("sender_id", otherId), Q.equal("is_read", false), Q.limit(100)], mapRow);
+          for (const r of rows) {
+            try { await tables.updateRow({ databaseId: APPWRITE_DB, tableId: "messages", rowId: r.id, data: { is_read: true } }); } catch (e) {}
+          }
+        } catch (e) {}
       },
       async unreadMessages(me) {
-        const { count } = await sb.from("messages").select("id", { count: "exact", head: true })
-          .eq("recipient_id", me).eq("is_read", false);
-        return count || 0;
+        const n = await countRows("messages", [Q.equal("recipient_id", me), Q.equal("is_read", false)]);
+        return n || 0;
       },
       async totalLikesReceived(userId) {
-        const { data } = await sb.from("videos").select("like_count").eq("creator_id", userId);
-        return (data || []).reduce((a, v) => a + (v.like_count || 0), 0);
+        const rows = await listMapped("videos", [Q.equal("creator_id", userId), Q.limit(100)], mapRow);
+        return rows.reduce((a, v) => a + (v.like_count || 0), 0);
       },
       async people(me) {
-        let q = sb.from("public_profiles").select("*").limit(12);
-        if (me) q = q.neq("id", me);
-        const { data } = await q;
-        return data || [];
+        const queries = [Q.limit(12)];
+        if (me) queries.push(Q.notEqual("$id", me));
+        return listMapped("public_profiles", queries, mapRow);
       },
       async shareVideo(me, videoId, toUserId) {
-        const { error } = await sb.from("notifications").insert({ user_id: toUserId, type: "share", actor_id: me, video_id: videoId });
-        if (error) throw error;
+        await createNotification({ user_id: toUserId, type: "share", actor_id: me, video_id: videoId }, [readUser(toUserId), updateUser(toUserId), deleteUser(toUserId)]);
         return true;
       },
       async comments(videoId, me) {
-        let rows;
-        const { data, error } = await sb.from("comments").select("*, profiles:profiles!comments_user_id_fkey(username, avatar_url)").eq("video_id", videoId).eq("moderation_status", "visible").order("is_pinned", { ascending: false }).order("created_at");
-        if (error) { // fall back without the join if the FK name differs
-          const { data: plain } = await sb.from("comments").select("*").eq("video_id", videoId).eq("moderation_status", "visible").order("created_at");
-          rows = plain || [];
-        } else {
-          rows = (data || []).map((c) => ({ ...c, username: c.profiles ? c.profiles.username : "user", avatar_url: c.profiles ? c.profiles.avatar_url : "" }));
+        /* No relationship-embed in listRows: comments first, authors joined
+         * in JS (the pattern used everywhere else in this file). */
+        let rows = await listMapped("comments", [Q.equal("video_id", videoId), Q.equal("moderation_status", "visible"), Q.orderDesc("is_pinned"), Q.orderAsc("$createdAt"), Q.limit(100)], mapRow);
+        if (rows.length) {
+          const byId = await getPublicProfiles(rows.map((c) => c.user_id));
+          rows.forEach((c) => {
+            const p = byId[c.user_id];
+            c.username = p ? p.username : "user";
+            c.avatar_url = p ? p.avatar_url : "";
+          });
         }
         try {
           if (rows.length) {
             const ids = rows.map((c) => c.id);
             const [lk, rp] = await Promise.all([
-              sb.from("comment_likes").select("comment_id, user_id").in("comment_id", ids),
-              sb.from("videos").select("id, reply_comment_id").in("reply_comment_id", ids).eq("moderation_status", "approved"),
+              listIn("comment_likes", "comment_id", ids, [Q.limit(100)], mapRow).catch(() => []),
+              listIn("videos", "reply_comment_id", ids, [Q.equal("moderation_status", "approved"), Q.limit(100)], mapRow).catch(() => []),
             ]);
             rows.forEach((c) => {
-              const ls = (lk.data || []).filter((l) => l.comment_id === c.id);
+              const ls = lk.filter((l) => l.comment_id === c.id);
               c.like_count = ls.length;
               c.liked_by_me = !!(me && ls.some((l) => l.user_id === me));
-              const r = (rp.data || []).find((x) => x.reply_comment_id === c.id);
+              const r = rp.find((x) => x.reply_comment_id === c.id);
               c.reply_video_id = r ? r.id : null;
             });
           }
@@ -1038,133 +1832,382 @@
         return rows;
       },
       async toggleCommentLike(me, commentId) {
-        const { data } = await sb.from("comment_likes").select("comment_id").eq("comment_id", commentId).eq("user_id", me).maybeSingle();
-        if (data) await sb.from("comment_likes").delete().eq("comment_id", commentId).eq("user_id", me);
-        else await sb.from("comment_likes").insert({ comment_id: commentId, user_id: me });
-        const { count } = await sb.from("comment_likes").select("comment_id", { count: "exact", head: true }).eq("comment_id", commentId);
-        return { liked: !data, count: count || 0 };
+        const existing = await one("comment_likes", [Q.equal("comment_id", commentId), Q.equal("user_id", me)], mapRow).catch(() => null);
+        if (existing) await deleteRowLenient("comment_likes", existing.id);
+        else {
+          try {
+            await tables.createRow({ databaseId: APPWRITE_DB, tableId: "comment_likes", rowId: ID.unique(), data: { comment_id: commentId, user_id: me }, permissions: [readAny(), deleteUser(me)] });
+          } catch (e) { throw asError(e); }
+        }
+        const count = await countRows("comment_likes", [Q.equal("comment_id", commentId)]);
+        return { liked: !existing, count: count || 0 };
       },
       async pinComment(me, commentId) {
-        const { data: c } = await sb.from("comments").select("is_pinned").eq("id", commentId).maybeSingle();
+        const c = await getQuiet("comments", commentId, mapRow);
         const target = !(c && c.is_pinned);
-        const { error } = await sb.rpc("set_comment_pin", { p_comment_id: commentId, p_pinned: target });
-        if (error) throw new Error(error.message);
+        try {
+          await callApi("set-comment-pin", { comment_id: commentId, pinned: target });
+        } catch (e) { throw asError(e); }
         return target;
       },
       async votePoll(me, videoId, choice) {
         choice = choice === 1 ? 1 : 0;
-        const { error } = await sb.from("poll_votes").upsert({ video_id: videoId, user_id: me, choice }, { onConflict: "video_id,user_id" });
-        if (error) throw error;
-        const { data: votes } = await sb.from("poll_votes").select("user_id, choice").eq("video_id", videoId);
-        const counts = [0, 0]; (votes || []).forEach((x) => { counts[x.choice] = (counts[x.choice] || 0) + 1; });
-        const mine = (votes || []).find((x) => x.user_id === me);
-        return { counts, total: (votes || []).length, my: mine ? mine.choice : null };
+        const existing = await one("poll_votes", [Q.equal("video_id", videoId), Q.equal("user_id", me)], mapRow).catch(() => null);
+        try {
+          if (existing) {
+            await tables.updateRow({ databaseId: APPWRITE_DB, tableId: "poll_votes", rowId: existing.id, data: { choice } });
+          } else {
+            try {
+              await tables.createRow({ databaseId: APPWRITE_DB, tableId: "poll_votes", rowId: ID.unique(), data: { video_id: videoId, user_id: me, choice }, permissions: [readAny(), updateUser(me), deleteUser(me)] });
+            } catch (e) {
+              if (e.code === 409 || /unique|duplicate|already exists/i.test(errMessage(e))) {
+                const retry = await one("poll_votes", [Q.equal("video_id", videoId), Q.equal("user_id", me)], mapRow).catch(() => null);
+                if (retry) await tables.updateRow({ databaseId: APPWRITE_DB, tableId: "poll_votes", rowId: retry.id, data: { choice } });
+                else throw e;
+              } else throw e;
+            }
+          }
+        } catch (e) { throw asError(e); }
+        const votes = await listMapped("poll_votes", [Q.equal("video_id", videoId), Q.limit(100)], mapRow);
+        const counts = [0, 0]; votes.forEach((x) => { counts[x.choice] = (counts[x.choice] || 0) + 1; });
+        const mine = votes.find((x) => x.user_id === me);
+        return { counts, total: votes.length, my: mine ? mine.choice : null };
       },
       async addComment(me, videoId, body) {
         body = String(body || "").trim(); if (!body) throw new Error("Write a comment first.");
-        const { data: v } = await sb.from("videos").select("creator_id").eq("id", videoId).single();
+        const v = await getQuiet("videos", videoId, mapRow);
         if (v && v.creator_id !== me) {
           const pr = await this.getAllowPrefs(v.creator_id);
           if (pr.allow_comment === "nobody") throw new Error("Comments are turned off for this video.");
           if (pr.allow_comment === "followers") {
-            const { data: f } = await sb.from("follows").select("follower_id").eq("follower_id", me).eq("following_id", v.creator_id).maybeSingle();
+            const f = await one("follows", [Q.equal("follower_id", me), Q.equal("following_id", v.creator_id)], mapRow).catch(() => null);
             if (!f) throw new Error("Only followers can comment on this video.");
           }
         }
-        const { data, error } = await sb.from("comments").insert({ video_id: videoId, user_id: me, body: body.slice(0, 500) }).select().single();
-        if (error) throw error;
-        // @mentions (respecting mention settings; best-effort)
+        let created;
+        try {
+          const doc = await tables.createRow({ databaseId: APPWRITE_DB, tableId: "comments", rowId: ID.unique(), data: { video_id: videoId, user_id: me, body: body.slice(0, 500) }, permissions: [readAny(), updateUser(me), updateTeam(), deleteUser(me), deleteTeam()] });
+          created = mapRow(doc);
+        } catch (e) { throw asError(e); }
+        /* @mentions (respecting mention settings; best-effort). */
         try {
           const names = [...new Set((body.match(/@([a-z0-9_.]+)/gi) || []).map((x) => x.slice(1).toLowerCase()))];
           for (const name of names) {
-            const { data: target } = await sb.from("public_profiles").select("id").eq("username", name).maybeSingle();
+            const target = await one("public_profiles", [Q.equal("username", name)], mapRow).catch(() => null);
             if (!target || target.id === me || (v && target.id === v.creator_id)) continue;
             const mp = await this.getAllowPrefs(target.id);
             if (mp.allow_mention === "nobody") continue;
             if (mp.allow_mention === "followers") {
-              const { data: f } = await sb.from("follows").select("follower_id").eq("follower_id", me).eq("following_id", target.id).maybeSingle();
+              const f = await one("follows", [Q.equal("follower_id", me), Q.equal("following_id", target.id)], mapRow).catch(() => null);
               if (!f) continue;
             }
-            await sb.from("notifications").insert({ user_id: target.id, type: "mention", actor_id: me, video_id: videoId });
+            await createNotification({ user_id: target.id, type: "mention", actor_id: me, video_id: videoId }, [readUser(target.id), updateUser(target.id), deleteUser(target.id)], { swallow: true });
           }
         } catch (e) {}
-        return data;
+        return created;
       },
       async deleteComment(me, commentId) {
-        const { error } = await sb.from("comments").delete().eq("id", commentId);
-        if (error) throw error;
+        try { await deleteRowLenient("comments", commentId); } catch (e) { throw asError(e); }
       },
       async submitVideo(me, meta) {
-        // Live uploads must come through the create-upload Edge Function,
-        // which verifies metadata server-side and returns the storage path.
-        const { data, error } = await sb.functions.invoke("create-upload", { body: meta });
-        if (error) throw new Error("Upload service not configured yet (create-upload function).");
-        return data;
+        /* Spec §8.3 inverted flow: the file bytes go to the media bucket
+         * FIRST (owner + team file permissions), then create-upload
+         * validates and creates the row. The upload UI hands this store
+         * the File object as meta.file (app.js doSubmit); the file-first
+         * branch below also runs when an already-uploaded file id is
+         * supplied. The create-upload response envelope { ok, data } is
+         * unwrapped here: the caller receives
+         * { video, upload_url: null } (there is no upload_url in this
+         * contract — the file is already uploaded), never the raw
+         * envelope. Thumbnail data URLs are uploaded as files on this
+         * same path, because a canvas data URL can exceed the 2048-char
+         * thumbnail_path attribute (a short data URL is passed through
+         * verbatim only when no file upload happens). */
+        const m = meta || {};
+        /* File-id aliases, mirroring the names create-upload accepts:
+         * canonical fileId, file_id, and a bare-id storage_path. A
+         * storage_path that is a data URL / external URL is not a file
+         * id (it is the pre-upload placeholder) and is ignored here. */
+        const isBareFileId = (v) => typeof v === "string" && v.trim().length > 0 && v.trim().length <= 64 && !v.trim().startsWith("data:") && !/^https?:\/\//i.test(v.trim()) && !v.includes("/") && !v.includes(" ");
+        let fileId = m.fileId || m.file_id || (isBareFileId(m.storage_path) ? String(m.storage_path).trim() : null) || null;
+        let thumbFileId = m.thumbnailFileId || m.thumbnail_file_id || (isBareFileId(m.thumbnail_path) ? String(m.thumbnail_path).trim() : null) || null;
+        let thumbPath = m.thumbnail_path || "";
+        try {
+          if (!fileId && m.file && storage && typeof storage.createFile === "function") {
+            const uploaded = await storage.createFile({ bucketId: MEDIA_BUCKET, fileId: ID.unique(), file: m.file, permissions: [readUser(me), readTeam(), updateUser(me), updateTeam(), deleteUser(me), deleteTeam()] });
+            fileId = (uploaded && (uploaded.$id || uploaded.id)) || null;
+          }
+          if (!thumbFileId && typeof thumbPath === "string" && thumbPath.indexOf("data:") === 0) {
+            const blob = dataUrlToBlob(thumbPath);
+            if (blob && storage && typeof storage.createFile === "function") {
+              const uploadedThumb = await storage.createFile({ bucketId: MEDIA_BUCKET, fileId: ID.unique(), file: blob, permissions: [readUser(me), readTeam(), updateUser(me), updateTeam(), deleteUser(me), deleteTeam()] });
+              thumbFileId = (uploadedThumb && (uploadedThumb.$id || uploadedThumb.id)) || null;
+            }
+          }
+        } catch (e) {
+          /* A failed pre-upload must not fall through to a row with no
+           * file: surface the real upload error, not a generic string. */
+          throw asError(e);
+        }
+        const payload = Object.assign({}, m);
+        delete payload.file;
+        delete payload.fileId;
+        delete payload.file_id;
+        delete payload.thumbnailFileId;
+        delete payload.thumbnail_file_id;
+        /* The upload/post path carries no categories: never send
+         * category_ids to create-upload. `location` (optional string),
+         * sound_*, trim_*, content_disclosure and link_url pass through
+         * as extra fields; create-upload stores them on the video row. */
+        delete payload.category_ids;
+        /* Send the file ids under the canonical names create-upload
+         * reads first (fileId / thumbnailFileId). When a file id is
+         * present, drop the raw storage_path / thumbnail_path fields so
+         * the function never sees the empty placeholder or the giant
+         * thumbnail data URL alongside the id. When no file id exists,
+         * the original fields pass through and create-upload returns
+         * its own "fileId is required" error. */
+        if (fileId) {
+          payload.fileId = fileId;
+          delete payload.storage_path;
+        }
+        if (thumbFileId) {
+          payload.thumbnailFileId = thumbFileId;
+          delete payload.thumbnail_path;
+        }
+        let result;
+        try {
+          result = await callApi("create-upload", payload);
+        } catch (e) {
+          throw asError(e);
+        }
+        /* Unwrap the { ok, data } envelope. Also accept the legacy
+         * { video, upload_url } shape and a bare video document, so a
+         * mock / older function response still works. */
+        const shaped = (result && typeof result === "object" && result.data !== undefined) ? result.data : result;
+        const videoDoc = (shaped && shaped.video) || shaped;
+        if (videoDoc && (videoDoc.$id || videoDoc.id)) {
+          return { video: mapVideo(videoDoc), upload_url: (shaped && shaped.upload_url) || null };
+        }
+        return result;
       },
       async report(me, targetType, targetId, reason) {
-        const { error } = await sb.from("reports").insert({ reporter_id: me, target_type: targetType, target_id: targetId, reason: String(reason).slice(0, 500) });
-        if (error) throw error;
+        const data = { reporter_id: me, target_type: targetType, target_id: targetId, reason: String(reason).slice(0, 500) };
+        await createReport(data, [readUser(me), readTeam(), updateTeam(), deleteTeam()]);
+      },
+      async reportSound(me, soundId, reason) {
+        if (!me) throw new Error("Sign in to report a sound.");
+        const clean = String(reason || "").trim().slice(0, 500);
+        if (!clean) throw new Error("Give a reason for the report.");
+        /* Same pattern as report(): direct `reports` row first, with
+         * the api file-report action as fallback (createReport). The
+         * reported sound stays visible until an admin removes it — no
+         * auto-hide. The api file-report action accepts target_type
+         * "sound" too (REPORT_TYPES), so the fallback files the
+         * report server-side when the direct row write fails. */
+        const data = { reporter_id: me, target_type: "sound", target_id: soundId, reason: clean };
+        await createReport(data, [readUser(me), readTeam(), updateTeam(), deleteTeam()]);
       },
       async toggleBlock(me, userId) {
-        const { data } = await sb.from("blocked_users").select("blocked_id").eq("blocker_id", me).eq("blocked_id", userId).maybeSingle();
-        if (data) { await sb.from("blocked_users").delete().eq("blocker_id", me).eq("blocked_id", userId); return false; }
-        const { error } = await sb.from("blocked_users").insert({ blocker_id: me, blocked_id: userId });
-        if (error) throw error; return true;
+        if (me === userId) throw new Error("You cannot block yourself.");
+        const existing = await one("blocked_users", [Q.equal("blocker_id", me), Q.equal("blocked_id", userId)], mapRow).catch(() => null);
+        if (existing) { await deleteRowLenient("blocked_users", existing.id); return false; }
+        try {
+          await tables.createRow({ databaseId: APPWRITE_DB, tableId: "blocked_users", rowId: ID.unique(), data: { blocker_id: me, blocked_id: userId }, permissions: [readUser(me), deleteUser(me)] });
+        } catch (e) { throw asError(e); }
+        return true;
       },
       async blockedList(me) {
-        const { data } = await sb.from("blocked_users").select("blocked_id,created_at").eq("blocker_id", me);
-        const rows = data || [];
+        const rows = await listMapped("blocked_users", [Q.equal("blocker_id", me), Q.limit(100)], mapRow);
         if (!rows.length) return [];
-        const { data: ps } = await sb.from("public_profiles").select("*").in("id", rows.map((x) => x.blocked_id));
+        const byId = await getPublicProfiles(rows.map((x) => x.blocked_id));
         const at = Object.fromEntries(rows.map((x) => [x.blocked_id, x.created_at]));
-        return (ps || []).map((pr) => ({ ...pr, blocked_at: at[pr.id] || null }));
+        return rows.map((x) => byId[x.blocked_id]).filter(Boolean).map((pr) => Object.assign({}, pr, { blocked_at: at[pr.id] || null }));
       },
       async notifications(me) {
-        const { data } = await sb.from("notifications").select("*").eq("user_id", me).order("created_at", { ascending: false }).limit(50);
-        return data || [];
+        return listMapped("notifications", [Q.equal("user_id", me), Q.orderDesc("$createdAt"), Q.limit(50)], mapRow);
       },
-      async markNotificationsRead(me) { await sb.from("notifications").update({ is_read: true }).eq("user_id", me); },
+      async markNotificationsRead(me) {
+        try {
+          const rows = await listMapped("notifications", [Q.equal("user_id", me), Q.equal("is_read", false), Q.limit(100)], mapRow);
+          for (const r of rows) {
+            try { await tables.updateRow({ databaseId: APPWRITE_DB, tableId: "notifications", rowId: r.id, data: { is_read: true } }); } catch (e) {}
+          }
+        } catch (e) {}
+      },
       async search(me, q) {
         q = String(q || "").trim(); if (!q) return { users: [], videos: [] };
-        const [u, v] = await Promise.all([
-          sb.from("public_profiles").select("*").ilike("username", "%" + q + "%").limit(20),
-          sb.from("public_videos").select("*").ilike("caption", "%" + q + "%").limit(20),
+        const [users, videos] = await Promise.all([
+          listMapped("public_profiles", [Q.search("username", q), Q.limit(20)], mapRow).catch(() => []),
+          loadPublicVideos({ queries: [Q.search("caption", q)], limit: 20, viewerId: me || null }).catch(() => []),
         ]);
-        return { users: u.data || [], videos: v.data || [] };
+        return { users, videos };
+      },
+      /* --- sounds library (catalog + user-added + original sounds) ---
+       * Live contract (to be backed by the `sounds` table + media bucket
+       * per APPWRITE_SETUP.md): rows carry title, category,
+       * duration_seconds, storage_path (media file id) and source, plus
+       * — once the table gains them — creator_id, source_type, status,
+       * report_count and video_id. Direct-to-library (2026-11-03):
+       * any signed-in user can add a sound, live at once, no role
+       * check in the client. deleteSound marks status "removed" via
+       * updateRow and only falls back to deleteRow when the update is
+       * impossible (e.g. the status attribute does not exist yet).
+       * Original sounds are created server-side by create-upload /
+       * publish-draft (NOT by this client: all live video creation
+       * goes through those functions); their rows merge here like any
+       * other row, deduped by the stable "original-<videoId>" id.
+       * When the table does not exist yet, listSounds degrades to the
+       * built-in catalog (empty) and addSound surfaces the real error
+       * instead of pretending the sound was saved. */
+      async loadSoundsCatalog(fetcher) { return loadSoundsCatalog(fetcher); },
+      async listSounds() {
+        let rows = [];
+        try {
+          rows = await listMapped("sounds", [Q.orderAsc("$createdAt"), Q.limit(100)], mapRow);
+        } catch (e) { rows = []; }
+        const mapped = rows.map((r) => {
+          const out = { id: r.id, title: r.title, category: r.category,
+            duration_seconds: r.duration_seconds || null,
+            src: r.storage_path || r.src || "",
+            source: r.source || "Added by the owner",
+            creator_id: r.creator_id || null, creator_username: r.creator_username || null,
+            source_type: r.source_type || "admin", status: r.status || "live",
+            report_count: Number(r.report_count) || 0, video_id: r.video_id || null,
+            created_at: r.created_at || null };
+          if (looksLikeFileId(out.src)) out.src = fileViewUrl(out.src);
+          return out;
+        }).filter((s) => s.status !== "removed");
+        /* Best-effort creator-name enrichment for rows that carry only
+         * creator_id (server-created originals / legacy rows). A failed
+         * lookup leaves the rows usable without a name. */
+        try {
+          const ids = [...new Set(mapped.filter((s) => s.creator_id && !s.creator_username).map((s) => s.creator_id))];
+          if (ids.length) {
+            const byId = await getPublicProfiles(ids);
+            mapped.forEach((s) => { if (s.creator_id && !s.creator_username && byId[s.creator_id]) s.creator_username = byId[s.creator_id].username || null; });
+          }
+        } catch (e) { /* names are display-only */ }
+        /* Catalog-file entries merge in front of collection rows and
+         * resolve a media-bucket file id to a streaming view URL, the
+         * same as collection rows; sounds are streamed for playback
+         * only, never exposed as downloads in the UI. */
+        const catalog = await loadSoundsCatalog();
+        const fileCatalog = catalog.map((s) => {
+          const out = Object.assign({ creator_id: null, creator_username: null, video_id: null, report_count: 0, status: "live", source_type: "catalog" }, s,
+            { source_type: s.source_type || "catalog", status: s.status || "live", report_count: Number(s.report_count) || 0 });
+          if (looksLikeFileId(out.src)) out.src = fileViewUrl(out.src);
+          return out;
+        });
+        return dedupeSounds(SOUNDS_CATALOG.concat(fileCatalog, mapped));
+      },
+      async addSound(me, input) {
+        if (!me) throw new Error("Sign in to add a sound.");
+        const title = String((input && input.title) || "").trim().slice(0, 80);
+        const category = String((input && input.category) || "");
+        if (!title) throw new Error("Give the sound a title.");
+        if (!SOUND_CATEGORIES.some(([slug]) => slug === category)) throw new Error("Pick a sound category.");
+        let path = String((input && input.src) || "").trim();
+        if (input && input.file) {
+          const uploaded = await storage.createFile({ bucketId: MEDIA_BUCKET, fileId: ID.unique(), file: input.file, permissions: [readAny(), readTeam(), updateTeam(), deleteTeam()] });
+          path = (uploaded && (uploaded.$id || uploaded.id)) || "";
+        }
+        if (!path) throw new Error("Choose an audio file for the sound.");
+        const source = String((input && input.source) || "").trim().slice(0, 120);
+        const prof = await fetchMyProfile();
+        const isStaff = !!(prof && (prof.role === "admin" || prof.role === "moderator"));
+        const sourceType = isStaff ? "admin" : "user";
+        const localMeta = { creator_id: me, creator_username: prof ? (prof.username || null) : null,
+          source_type: sourceType, status: "live", report_count: 0,
+          video_id: (input && input.video_id) || null,
+          source: source || (isStaff ? "Added by the owner" : "Added by a user") };
+        const legacyData = { title, category, duration_seconds: Number((input && input.duration_seconds) || 0) || null,
+          storage_path: path, source: localMeta.source };
+        const fullData = Object.assign({}, legacyData, { creator_id: me, source_type: sourceType, status: "live", report_count: 0 });
+        if (localMeta.video_id) fullData.video_id = localMeta.video_id;
+        let row = null;
+        try {
+          const doc = await tables.createRow({ databaseId: APPWRITE_DB, tableId: "sounds", rowId: ID.unique(),
+            data: fullData, permissions: [readAny(), updateTeam(), deleteTeam()] });
+          row = mapRow(doc);
+        } catch (e) {
+          /* The sounds table as documented has only the 5 legacy
+           * attributes: an unknown-attribute rejection means the new
+           * fields are not in the table yet. Retry with the legacy
+           * shape so the sound is still saved; the metadata above is
+           * returned in-session. Any other failure surfaces as-is. */
+          if (!isUnknownAttributeError(e)) throw asError(e);
+          try {
+            const doc = await tables.createRow({ databaseId: APPWRITE_DB, tableId: "sounds", rowId: ID.unique(),
+              data: legacyData, permissions: [readAny(), updateTeam(), deleteTeam()] });
+            row = mapRow(doc);
+          } catch (e2) { throw asError(e2); }
+        }
+        return { id: row.id, title: row.title, category: row.category, duration_seconds: row.duration_seconds || null,
+          src: looksLikeFileId(row.storage_path) ? fileViewUrl(row.storage_path) : (row.storage_path || row.src || ""),
+          source: row.source || localMeta.source,
+          creator_id: row.creator_id || localMeta.creator_id, creator_username: row.creator_username || localMeta.creator_username,
+          source_type: row.source_type || localMeta.source_type, status: row.status || "live",
+          report_count: Number(row.report_count) || 0, video_id: row.video_id || localMeta.video_id,
+          created_at: row.created_at || null };
+      },
+      async deleteSound(me, soundId) {
+        try {
+          await tables.updateRow({ databaseId: APPWRITE_DB, tableId: "sounds", rowId: soundId, data: { status: "removed" } });
+          return;
+        } catch (updateErr) {
+          /* Status-removed via update is the contract; row delete is
+           * only the fallback when the update is impossible (status
+           * attribute missing, or update not permitted by the mock /
+           * permissions). If the delete also fails, surface the
+           * original update error. */
+          try { await tables.deleteRow({ databaseId: APPWRITE_DB, tableId: "sounds", rowId: soundId }); }
+          catch (e) { throw asError(updateErr); }
+        }
       },
       async myDrafts(me) {
-        const { data } = await sb.from("videos").select("*").eq("creator_id", me).eq("moderation_status", "draft").order("created_at", { ascending: false });
-        return data || [];
+        return listMapped("videos", [Q.equal("creator_id", me), Q.equal("moderation_status", "draft"), Q.orderDesc("$createdAt"), Q.limit(100)], mapVideo);
       },
       async publishDraft(me, videoId) {
-        const { error } = await sb.rpc("publish_draft", { p_video_id: videoId });
-        if (error) throw new Error(error.message);
-        // Caption @mentions fire on publish (best-effort, same as addComment).
+        /* Drafts go live at once: the api publish-draft action must set
+         * the live status ("approved") directly — no review queue. */
         try {
-          const { data: v } = await sb.from("videos").select("caption").eq("id", videoId).single();
+          await callApi("publish-draft", { video_id: videoId });
+        } catch (e) { throw asError(e); }
+        /* Caption @mentions fire on publish (best-effort, same as addComment). */
+        try {
+          const v = await getQuiet("videos", videoId, mapRow);
           const names = [...new Set((String((v && v.caption) || "").match(/@([a-z0-9_.]+)/gi) || []).map((x) => x.slice(1).toLowerCase()))];
           for (const name of names) {
-            const { data: target } = await sb.from("public_profiles").select("id").eq("username", name).maybeSingle();
+            const target = await one("public_profiles", [Q.equal("username", name)], mapRow).catch(() => null);
             if (!target || target.id === me) continue;
-            await sb.from("notifications").insert({ user_id: target.id, type: "mention", actor_id: me, video_id: videoId });
+            await createNotification({ user_id: target.id, type: "mention", actor_id: me, video_id: videoId }, [readUser(target.id), updateUser(target.id), deleteUser(target.id)], { swallow: true });
           }
         } catch (e) {}
       },
       async deleteDraft(me, videoId) {
-        const { error } = await sb.from("videos").delete().eq("id", videoId).eq("creator_id", me).eq("moderation_status", "draft");
-        if (error) throw error;
+        /* The old guarded delete (id + creator + draft) is a no-op when
+         * the guards fail; the api delete-video action owns the cascade. */
+        const row = await getQuiet("videos", videoId, mapRow);
+        if (!row || row.creator_id !== me || row.moderation_status !== "draft") return;
+        try {
+          await callApi("delete-video", { video_id: videoId });
+        } catch (e) { throw asError(e); }
       },
       async hashtagVideos(me, tag) {
         tag = String(tag || "").replace(/^#/, "").toLowerCase(); if (!tag) return [];
-        const { data } = await sb.from("public_videos").select("*").ilike("caption", "%#" + tag + "%").limit(40);
-        const rows = (data || []).filter((v) => (String(v.caption || "").match(/#([^\s#]+)/g) || [])
+        /* Full-text search is word-based, not substring: the JS exact
+         * filter below restores precision; recall depends on the search
+         * index returning the row (see MIGRATION_NOTES.md). */
+        const found = await loadPublicVideos({ queries: [Q.search("caption", "#" + tag)], limit: 40, viewerId: me || null }).catch(() => []);
+        const rows = found.filter((v) => (String(v.caption || "").match(/#([^\s#]+)/g) || [])
           .some((t) => t.slice(1).toLowerCase() === tag));
         return enrichLive(rows, me);
       },
       async trendingHashtags(me) {
-        const { data } = await sb.from("public_videos").select("caption").limit(100);
+        const rows = await listMapped("videos", [Q.equal("moderation_status", "approved"), Q.equal("visibility", "public"), Q.orderDesc("$createdAt"), Q.limit(100)], mapRow);
         const counts = {};
-        (data || []).forEach((v) => {
+        rows.forEach((v) => {
           (String(v.caption || "").match(/#([^\s#]+)/g) || []).forEach((t) => {
             const k = t.slice(1).toLowerCase(); counts[k] = (counts[k] || 0) + 1;
           });
@@ -1173,133 +2216,187 @@
           .sort((a, b) => b.count - a.count).slice(0, 12);
       },
       async profileByUsername(username) {
-        const { data } = await sb.from("public_profiles").select("*").eq("username", String(username || "").toLowerCase()).maybeSingle();
-        return data || null;
+        const row = await one("public_profiles", [Q.equal("username", String(username || "").toLowerCase())], mapRow).catch(() => null);
+        return row || null;
       },
       /* --- stories (24h, moderated before they show) --- */
       async submitStory(me, meta) {
         let path = meta.storage_path || "";
         if (meta.file) {
-          const name = String(meta.file.name || "story");
-          const ext = (name.split(".").pop() || (meta.media_type === "video" ? "mp4" : "jpg")).toLowerCase();
-          path = me + "/" + uid() + "." + ext;
-          const { error: upErr } = await sb.storage.from("stories").upload(path, meta.file, { contentType: meta.file.type || undefined });
-          if (upErr) throw new Error(upErr.message);
+          try {
+            const uploaded = await storage.createFile({ bucketId: MEDIA_BUCKET, fileId: ID.unique(), file: meta.file, permissions: [readUser(me), readTeam(), updateUser(me), updateTeam(), deleteUser(me), deleteTeam()] });
+            path = (uploaded && (uploaded.$id || uploaded.id)) || "";
+          } catch (e) { throw asError(e); }
         }
-        const { data, error } = await sb.from("stories").insert({
-          user_id: me, media_type: meta.media_type === "video" ? "video" : "image",
-          storage_path: path, caption: String(meta.caption || "").slice(0, 200),
-          duration_seconds: meta.duration_seconds || null,
-        }).select().single();
-        if (error) throw error;
-        return data;
+        try {
+          const doc = await tables.createRow({ databaseId: APPWRITE_DB, tableId: "stories", rowId: ID.unique(), data: {
+            user_id: me, media_type: meta.media_type === "video" ? "video" : "image",
+            storage_path: path, caption: String(meta.caption || "").slice(0, 200),
+            duration_seconds: meta.duration_seconds || null,
+          }, permissions: [readUser(me), readTeam(), updateUser(me), updateTeam(), deleteUser(me), deleteTeam()] });
+          return mapStory(doc);
+        } catch (e) { throw asError(e); }
       },
       async storiesFeed(me) {
         const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
-        const { data } = await sb.from("stories").select("*").eq("moderation_status", "approved").gt("created_at", since).order("created_at");
-        const rows = data || [];
+        const rows = await listMapped("stories", [Q.equal("moderation_status", "approved"), Q.greaterThan("$createdAt", since), Q.orderAsc("$createdAt"), Q.limit(100)], mapStory);
         const ids = [...new Set(rows.map((r) => r.user_id))];
-        const { data: ps } = ids.length ? await sb.from("public_profiles").select("*").in("id", ids) : { data: [] };
-        const profById = Object.fromEntries((ps || []).map((x) => [x.id, x]));
+        const profById = await getPublicProfiles(ids);
         let seen = [];
         if (me && rows.length) {
-          const { data: vs } = await sb.from("story_views").select("story_id").eq("user_id", me).in("story_id", rows.map((r) => r.id));
-          seen = (vs || []).map((x) => x.story_id);
+          const vs = await listIn("story_views", "story_id", rows.map((r) => r.id), [Q.equal("user_id", me), Q.limit(100)], mapRow).catch(() => []);
+          seen = vs.map((x) => x.story_id);
         }
         const byUser = new Map();
         for (const r of rows) {
-          let url = r.storage_path;
-          try { const { data: su } = await sb.storage.from("stories").createSignedUrl(r.storage_path, 3600); if (su && su.signedUrl) url = su.signedUrl; } catch (e) {}
           if (!byUser.has(r.user_id)) byUser.set(r.user_id, { user: profById[r.user_id] || { id: r.user_id, username: "unknown" }, stories: [], has_unseen: false });
           const g = byUser.get(r.user_id);
-          g.stories.push({ ...r, storage_path: url });
+          g.stories.push(r);
           if (!seen.includes(r.id)) g.has_unseen = true;
         }
         return [...byUser.values()].sort((a, b) => (b.has_unseen ? 1 : 0) - (a.has_unseen ? 1 : 0));
       },
       async myStories(me) {
-        const { data } = await sb.from("stories").select("*").eq("user_id", me).order("created_at", { ascending: false });
-        return data || [];
+        return listMapped("stories", [Q.equal("user_id", me), Q.orderDesc("$createdAt"), Q.limit(100)], mapStory);
       },
       async markStorySeen(me, storyId) {
-        try { await sb.from("story_views").upsert({ story_id: storyId, user_id: me }); } catch (e) {}
+        try {
+          const existing = await one("story_views", [Q.equal("story_id", storyId), Q.equal("user_id", me)], mapRow).catch(() => null);
+          if (!existing) {
+            try {
+              await tables.createRow({ databaseId: APPWRITE_DB, tableId: "story_views", rowId: ID.unique(), data: { story_id: storyId, user_id: me }, permissions: [readUser(me), deleteUser(me)] });
+            } catch (e) { if (!(e.code === 409 || /unique|duplicate|already exists/i.test(errMessage(e)))) throw e; }
+          }
+        } catch (e) {}
       },
       async adminStoryQueue() {
-        const { data } = await sb.from("stories").select("*").eq("moderation_status", "pending").order("created_at");
-        const rows = data || [];
-        const ids = [...new Set(rows.map((r) => r.user_id))];
-        const { data: ps } = ids.length ? await sb.from("public_profiles").select("*").in("id", ids) : { data: [] };
-        const profById = Object.fromEntries((ps || []).map((x) => [x.id, x]));
-        return rows.map((r) => ({ ...r, username: profById[r.user_id] ? profById[r.user_id].username : "unknown", avatar_url: profById[r.user_id] ? profById[r.user_id].avatar_url : "" }));
+        const rows = await listMapped("stories", [Q.equal("moderation_status", "pending"), Q.orderAsc("$createdAt"), Q.limit(100)], mapStory);
+        const profById = await getPublicProfiles(rows.map((r) => r.user_id));
+        return rows.map((r) => Object.assign({}, r, { username: profById[r.user_id] ? profById[r.user_id].username : "unknown", avatar_url: profById[r.user_id] ? profById[r.user_id].avatar_url : "" }));
       },
       async adminDecideStory(adminId, storyId, decision) {
-        const { error } = await sb.from("stories").update({ moderation_status: decision === "approved" ? "approved" : "rejected" }).eq("id", storyId);
-        if (error) throw error;
+        try {
+          await callApi("moderate-story", { story_id: storyId, decision: decision === "approved" ? "approved" : "rejected" });
+        } catch (e) { throw asError(e); }
       },
       async adminQueue() {
-        const { data } = await sb.from("videos").select("*").in("moderation_status", ["pending", "needs_review"]).order("created_at");
-        return data || [];
+        const rows = await listMapped("videos", [Q.equal("moderation_status", ["pending", "needs_review"]), Q.orderAsc("$createdAt"), Q.limit(100)], mapVideo);
+        const profById = await getPublicProfiles(rows.map((v) => v.creator_id));
+        rows.forEach((v) => {
+          const p = profById[v.creator_id];
+          v.username = p ? p.username : v.creator_id;
+          v.display_name = p ? p.display_name : "";
+          v.avatar_url = p ? p.avatar_url : "";
+          v.verified = !!(p && p.verified);
+        });
+        await attachCategories(rows);
+        return rows;
       },
       async adminDecide(adminId, videoId, decision, reason) {
-        const { error } = await sb.from("videos").update({ moderation_status: decision, rejection_reason: decision === "rejected" ? reason : null }).eq("id", videoId);
-        if (error) throw error;
-        await sb.from("moderation_reviews").insert({ video_id: videoId, reviewer_id: adminId, decision, reason: reason || null });
+        /* The function writes the moderation_reviews row, sets
+         * published_at on first approval, flips file permissions and
+         * notifies the creator (spec §8). */
+        try {
+          await callApi("moderate-video", { video_id: videoId, decision, reason: reason || null });
+        } catch (e) { throw asError(e); }
       },
       async adminReports() {
-        const { data } = await sb.from("reports").select("*").eq("status", "open").order("created_at");
-        return data || [];
+        return listMapped("reports", [Q.equal("status", "open"), Q.orderAsc("$createdAt"), Q.limit(100)], mapRow);
       },
-      async adminSetReportStatus(id, status) { await sb.from("reports").update({ status }).eq("id", id); },
+      async adminSetReportStatus(id, status) {
+        try {
+          await callApi("decide-report", { report_id: id, status });
+        } catch (e) { throw asError(e); }
+      },
       async adminStats() {
         const [u, a, p, r, rep] = await Promise.all([
-          sb.from("profiles").select("*", { count: "exact", head: true }),
-          sb.from("videos").select("*", { count: "exact", head: true }).eq("moderation_status", "approved"),
-          sb.from("videos").select("*", { count: "exact", head: true }).in("moderation_status", ["pending", "needs_review"]),
-          sb.from("videos").select("*", { count: "exact", head: true }).eq("moderation_status", "rejected"),
-          sb.from("reports").select("*", { count: "exact", head: true }).eq("status", "open"),
+          countRows("profiles", []),
+          countRows("videos", [Q.equal("moderation_status", "approved")]),
+          countRows("videos", [Q.equal("moderation_status", ["pending", "needs_review"])]),
+          countRows("videos", [Q.equal("moderation_status", "rejected")]),
+          countRows("reports", [Q.equal("status", "open")]),
         ]);
-        return { users: u.count || 0, approved: a.count || 0, pending: p.count || 0, rejected: r.count || 0, openReports: rep.count || 0 };
+        return { users: u || 0, approved: a || 0, pending: p || 0, rejected: r || 0, openReports: rep || 0 };
       },
       async deleteAccount(me) {
-        const { error } = await sb.functions.invoke("delete-account", { body: {} });
-        if (error) throw new Error("Account deletion runs through the delete-account function at connection time.");
+        try {
+          await callApi("delete-account", {});
+        } catch (e) {
+          throw new Error("Account deletion runs through the delete-account function at connection time.");
+        }
       },
       async ensureDemoAdmin() { return null; }, // live mode: no demo admin exists
       async adminUsers() {
-        const { data } = await sb.from("profiles").select("*").order("created_at", { ascending: false });
-        return data || [];
+        return listMapped("profiles", [Q.orderDesc("$createdAt"), Q.limit(100)], mapRow);
       },
       async adminSetSuspended(userId, suspended) {
-        const { error } = await sb.from("profiles").update({ is_suspended: !!suspended }).eq("id", userId);
-        if (error) throw error;
+        try {
+          if (suspended) await callApi("suspend-user", { user_id: userId });
+          else await callApi("unsuspend-user", { user_id: userId });
+        } catch (e) { throw asError(e); }
       },
       async adminReviews() {
-        const { data } = await sb.from("moderation_reviews").select("*").order("created_at", { ascending: false }).limit(100);
-        return data || [];
+        return listMapped("moderation_reviews", [Q.orderDesc("$createdAt"), Q.limit(100)], mapRow);
       },
       async adminCategories() {
-        const { data } = await sb.from("categories").select("*").order("sort_order");
-        return data || [];
+        return listMapped("categories", [Q.orderAsc("sort_order"), Q.limit(100)], mapRow);
       },
       async adminAddCategory(name) {
-        const { data, error } = await sb.from("categories").insert({ name: String(name).slice(0, 60), slug: String(name).toLowerCase().replace(/[^a-z0-9]+/g, "-"), sort_order: 999 }).select().single();
-        if (error) throw error; return data;
+        const slug = String(name).toLowerCase().replace(/[^a-z0-9]+/g, "-");
+        /* Document IDs cap at 36 chars; the slug attribute keeps the full
+         * value, the row ID is the truncated slug when it would overflow. */
+        const rowId = slug.slice(0, 36);
+        try {
+          const doc = await tables.createRow({ databaseId: APPWRITE_DB, tableId: "categories", rowId: ID.custom(rowId), data: { name: String(name).slice(0, 60), slug, sort_order: 999, is_active: true } });
+          return mapRow(doc);
+        } catch (e) { throw asError(e); }
       },
       async adminToggleCategory(id) {
-        const { data } = await sb.from("categories").select("is_active").eq("id", id).single();
-        const nextVal = !(data && data.is_active);
-        const { error } = await sb.from("categories").update({ is_active: nextVal }).eq("id", id);
-        if (error) throw error; return nextVal;
+        const data = await getOrNull("categories", id, mapRow);
+        if (!data) throw new Error("Category not found.");
+        const nextVal = !data.is_active;
+        try {
+          await tables.updateRow({ databaseId: APPWRITE_DB, tableId: "categories", rowId: id, data: { is_active: nextVal } });
+        } catch (e) { throw asError(e); }
+        return nextVal;
       },
     };
   }
 
-  function createStore(storage, supabaseClient) {
-    if (DEMO) return makeDemoStore(storage);
-    return makeLiveStore(supabaseClient);
+  /* Blob/File -> data URL (demo sound storage), without DOM access. */
+  async function blobToDataUrl(blob) {
+    const buf = await blob.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    let binary = "";
+    for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
+    const b64 = (typeof Buffer !== "undefined") ? Buffer.from(buf).toString("base64") : btoa(binary);
+    return "data:" + (blob.type || "audio/mpeg") + ";base64," + b64;
   }
 
-  const api = { createStore, CATEGORIES, DEMO, CFG };
+  /* Data-URL (canvas thumbnail) -> Blob, without any DOM access. Used
+   * only by the live upload path; never called at module load time. */
+  function dataUrlToBlob(dataUrl) {
+    try {
+      const comma = dataUrl.indexOf(",");
+      if (comma === -1) return null;
+      const header = dataUrl.slice(0, comma);
+      const mimeMatch = /data:([^;]+)/.exec(header);
+      const mime = mimeMatch ? mimeMatch[1] : "image/jpeg";
+      const b64 = dataUrl.slice(comma + 1);
+      const bin = (typeof atob === "function") ? atob(b64) : Buffer.from(b64, "base64").toString("binary");
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      if (typeof Blob !== "undefined") return new Blob([bytes], { type: mime });
+      return null;
+    } catch (e) { return null; }
+  }
+
+  function createStore(storage, backendClient) {
+    if (DEMO) return makeDemoStore(storage);
+    return makeLiveStore(backendClient);
+  }
+
+  const api = { createStore, CATEGORIES, DEMO, CFG, SOUNDS_CATALOG, SOUND_CATEGORIES, SOUND_ORIGINAL_CATEGORY, SOUNDS_CATALOG_PATH, loadSoundsCatalog };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   global.TokislaStore = api;
 })(typeof window !== "undefined" ? window : globalThis);

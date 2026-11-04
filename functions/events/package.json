@@ -1,0 +1,1 @@
+{"dependencies":{"node-appwrite":"31.1.0"},"description":"Tokisla database-event reactions: counter recounts and public-profile sync for Appwrite Cloud Functions.","engines":{"node":">=20"},"main":"index.js","name":"tokisla-events","private":true,"type":"module","version":"1.0.0"}

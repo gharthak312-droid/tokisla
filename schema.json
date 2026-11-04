@@ -1,0 +1,3866 @@
+{
+ "meta": {
+  "spec": "Tokisla Supabase -> Appwrite migration schema mirror",
+  "specDocument": "APPWRITE_SETUP.md",
+  "sourceMigrations": [
+   "supabase/migrations/0001_init.sql",
+   "supabase/migrations/0002_rls.sql",
+   "supabase/migrations/0003_features.sql"
+  ],
+  "sourceFunctions": [
+   "supabase/functions/create-upload/index.ts",
+   "supabase/functions/delete-account/index.ts"
+  ],
+  "counts": {
+   "sourceTables": 23,
+   "collections": 25,
+   "attributes": 139,
+   "indexes": 41,
+   "buckets": 2,
+   "functions": 4,
+   "teams": 1,
+   "databases": 1
+  },
+  "countNotes": [
+   "Source tables counted from CREATE TABLE statements across 0001/0003: 23, not 21 or 22 as stated in the brief.",
+   "Collections = 23 source tables + 1 new public_profiles sync collection + 1 new sounds collection (2026-11-03, sounds library; see sounds entry).",
+   "Attributes exclude Appwrite system fields ($id, $createdAt, $updatedAt, $permissions). created_at/updated_at are NOT attributes; they map to $createdAt/$updatedAt, except watch_history.watched_at which is a real attribute.",
+   "Indexes exclude system indexing of $createdAt/$updatedAt."
+  ],
+  "namingNote": "Appwrite TablesDB vocabulary (table/column/row) is the same object as collection/attribute/document. This file uses collection/attribute/document. Console may show TablesDB labels."
+ },
+ "project": {
+  "endpoint": "https://cloud.appwrite.io/v1",
+  "projectId": "6ae910e6000dad2f34b4",
+  "databaseId": "tokisla",
+  "freePlanBudget": {
+   "databases": "1 of 1",
+   "buckets": "2 of 3",
+   "functions": "4 of 5",
+   "storage": "2GB",
+   "bandwidth": "5GB"
+  }
+ },
+ "auth": {
+  "methods": [
+   "email/password"
+  ],
+  "anonymousSessions": false,
+  "emailVerification": "Enable only after a mail provider is configured and tested; do not require verified email before mail works.",
+  "identityRule": "Appwrite Auth user $id IS the Tokisla user id. profiles and public_profiles document IDs MUST equal the Auth user $id."
+ },
+ "teams": [
+  {
+   "id": "admins",
+   "name": "Admins",
+   "roles": [
+    "admin",
+    "moderator"
+   ],
+   "roleMeanings": {
+    "admin": "is_admin(): everything, including admin_actions, category writes, suspend/unsuspend, role changes",
+    "moderator": "is_moderator() but not admin: moderate videos/stories/comments, manage reports and verification requests, read moderation internals"
+   },
+   "authorityNote": "Team membership is the ONLY authority for admin/moderator power. profiles.role is a display mirror only and is never trusted by functions. Memberships are created only in Console by an existing team owner/admin or by a function holding the API key; users cannot self-grant membership."
+  }
+ ],
+ "database": {
+  "id": "tokisla",
+  "name": "Tokisla",
+  "type": "Appwrite-managed database (TablesDB/DocumentsDB). Do NOT use a native PostgreSQL/MySQL database."
+ },
+ "collections": [
+  {
+   "id": "profiles",
+   "name": "profiles",
+   "sourceTable": "profiles (0001 + private_account, website)",
+   "documentSecurity": true,
+   "documentIdRule": "Document $id MUST equal the Auth user $id.",
+   "permissions": {
+    "create": [
+     "create(\"users\")"
+    ],
+    "read": [],
+    "update": [],
+    "delete": []
+   },
+   "documentPermissionsTemplate": {
+    "read": [
+     "read(\"user:{ownerId}\")",
+     "read(\"team:admins\")"
+    ],
+    "update": [
+     "update(\"user:{ownerId}\")",
+     "update(\"team:admins\")"
+    ],
+    "delete": [
+     "delete(\"team:admins\")"
+    ]
+   },
+   "attributes": [
+    {
+     "key": "username",
+     "type": "string",
+     "size": 32,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Format ^[a-z0-9_.]{3,24}$ enforced by create-profile function + client, not by schema. Unique index."
+    },
+    {
+     "key": "display_name",
+     "type": "string",
+     "size": 60,
+     "elements": null,
+     "required": false,
+     "default": "",
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "bio",
+     "type": "string",
+     "size": 160,
+     "elements": null,
+     "required": false,
+     "default": "",
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "avatar_url",
+     "type": "string",
+     "size": 2048,
+     "elements": null,
+     "required": false,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "URL string only; no avatar upload path exists in the app."
+    },
+    {
+     "key": "website",
+     "type": "string",
+     "size": 200,
+     "elements": null,
+     "required": false,
+     "default": "",
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "role",
+     "type": "enum",
+     "size": null,
+     "elements": [
+      "user",
+      "moderator",
+      "admin"
+     ],
+     "required": false,
+     "default": "user",
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "DISPLAY MIRROR ONLY. Authority is Team admins. Never trusted by functions."
+    },
+    {
+     "key": "is_suspended",
+     "type": "boolean",
+     "size": null,
+     "elements": null,
+     "required": false,
+     "default": false,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Only functions change this, via api suspend action."
+    },
+    {
+     "key": "verified",
+     "type": "boolean",
+     "size": null,
+     "elements": null,
+     "required": false,
+     "default": false,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "SCHEMA GAP FIXED: no verified column exists in any migration, yet 0003 public_videos selects p.verified and the app reads/writes it. Only api decide-verification changes it."
+    },
+    {
+     "key": "private_account",
+     "type": "boolean",
+     "size": null,
+     "elements": null,
+     "required": false,
+     "default": false,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    }
+   ],
+   "indexes": [
+    {
+     "key": "username_unique",
+     "type": "unique",
+     "attributes": [
+      "username"
+     ]
+    }
+   ],
+   "notes": [
+    "Profile documents are created ONLY by the api function action create-profile, which forces role=user, is_suspended=false, verified=false. Collection create permission cannot express attribute-conditional creation.",
+    "Owner may update only username/display_name/bio/website/avatar_url/private_account; Appwrite cannot enforce per-attribute writes (residual risk R1).",
+    "Guests/other users must never hold read on a full profile document (role/is_suspended would leak). Public reads go through public_profiles."
+   ]
+  },
+  {
+   "id": "categories",
+   "name": "categories",
+   "sourceTable": "categories (0001 seed)",
+   "documentSecurity": false,
+   "documentIdRule": "Document $id = slug. Numeric category ids 1-20 are NOT preserved; slug is the join key.",
+   "permissions": {
+    "create": [
+     "create(\"team:admins\")"
+    ],
+    "read": [
+     "read(\"any\")"
+    ],
+    "update": [
+     "update(\"team:admins\")"
+    ],
+    "delete": [
+     "delete(\"team:admins\")"
+    ]
+   },
+   "documentPermissionsTemplate": null,
+   "attributes": [
+    {
+     "key": "name",
+     "type": "string",
+     "size": 60,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "slug",
+     "type": "string",
+     "size": 64,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Equals document $id."
+    },
+    {
+     "key": "sort_order",
+     "type": "integer",
+     "size": null,
+     "elements": null,
+     "required": false,
+     "default": 0,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "1-20 for seed data."
+    },
+    {
+     "key": "is_active",
+     "type": "boolean",
+     "size": null,
+     "elements": null,
+     "required": false,
+     "default": true,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Reads filter is_active=true except admin reads."
+    }
+   ],
+   "indexes": [
+    {
+     "key": "slug_unique",
+     "type": "unique",
+     "attributes": [
+      "slug"
+     ]
+    },
+    {
+     "key": "sort_order_idx",
+     "type": "key",
+     "attributes": [
+      "sort_order"
+     ]
+    }
+   ],
+   "notes": [
+    "Seed the exact 20 categories from migration 0001; see seed section."
+   ]
+  },
+  {
+   "id": "videos",
+   "name": "videos",
+   "sourceTable": "videos (0001 + 0003 filter/poll/duet_of/reply_*/draft)",
+   "documentSecurity": true,
+   "documentIdRule": "Auto-generated ID (ID.unique()).",
+   "permissions": {
+    "create": [],
+    "read": [],
+    "update": [],
+    "delete": []
+   },
+   "documentPermissionsTemplate": {
+    "notLive": {
+     "read": [
+      "read(\"user:{creatorId}\")",
+      "read(\"team:admins\")"
+     ],
+     "update": [
+      "update(\"user:{creatorId}\")",
+      "update(\"team:admins\")"
+     ],
+     "delete": [
+      "delete(\"user:{creatorId}\")",
+      "delete(\"team:admins\")"
+     ]
+    },
+    "approvedPublic": {
+     "read": [
+      "read(\"any\")"
+     ],
+     "update": [
+      "update(\"user:{creatorId}\")",
+      "update(\"team:admins\")"
+     ],
+     "delete": [
+      "delete(\"user:{creatorId}\")",
+      "delete(\"team:admins\")"
+     ]
+    },
+    "approvedFollowersOrPrivate": {
+     "read": [
+      "read(\"user:{creatorId}\")",
+      "read(\"team:admins\")"
+     ],
+     "update": [
+      "update(\"user:{creatorId}\")",
+      "update(\"team:admins\")"
+     ],
+     "delete": [
+      "delete(\"user:{creatorId}\")",
+      "delete(\"team:admins\")"
+     ]
+    },
+    "note": "notLive covers draft / rejected / needs_review (no pending step for new uploads since direct publish, 2026-11-03). New non-draft uploads are created directly with the approvedPublic / approvedFollowersOrPrivate template by create-upload. Flips happen ONLY inside the api moderation / publish-draft actions, together with file-permission flips. Creation is by create-upload function only; no client collection permissions."
+   },
+   "attributes": [
+    {
+     "key": "creator_id",
+     "type": "string",
+     "size": 36,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Auth user $id."
+    },
+    {
+     "key": "caption",
+     "type": "string",
+     "size": 300,
+     "elements": null,
+     "required": false,
+     "default": "",
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "location",
+     "type": "string",
+     "size": 256,
+     "elements": null,
+     "required": false,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Optional free-text place name from the post screen (added 2026-11-03, direct-publish change). Trimmed and capped at 256 chars by create-upload; null when absent. No categories or other post metadata is duplicated here."
+    },
+    {
+     "key": "sound_id",
+     "type": "string",
+     "size": 64,
+     "elements": null,
+     "required": false,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Catalog sound chosen for this video (added 2026-11-03, sounds library). Stored opaquely by create-upload; NOT FK-validated against the sounds collection, so built-in catalog entries need no server row. Null = original audio (default). No music anywhere."
+    },
+    {
+     "key": "sound_title",
+     "type": "string",
+     "size": 80,
+     "elements": null,
+     "required": false,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Display copy of the chosen catalog sound title, as sent by the client (sliced to 80 by create-upload). Null when no sound chosen."
+    },
+    {
+     "key": "sound_category",
+     "type": "enum",
+     "size": null,
+     "elements": [
+      "sound-effects",
+      "naat",
+      "taqreer",
+      "islamic"
+     ],
+     "required": false,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Display copy of the chosen catalog sound category. Unknown values are stored as null by create-upload (never fail the upload)."
+    },
+    {
+     "key": "trim_start_seconds",
+     "type": "double",
+     "size": null,
+     "elements": null,
+     "required": false,
+     "default": 0,
+     "array": false,
+     "min": 0,
+     "max": 20.5,
+     "notes": "Crop/Trim start (seconds) from the post screen, added 2026-11-03. Stored by create-upload clamped to [0, duration_seconds]; 0 when absent. Feed playback keeps the video inside [trim_start_seconds, trim_end_seconds]."
+    },
+    {
+     "key": "trim_end_seconds",
+     "type": "double",
+     "size": null,
+     "elements": null,
+     "required": false,
+     "default": null,
+     "array": false,
+     "min": 0,
+     "max": 20.5,
+     "notes": "Crop/Trim end (seconds) from the post screen, added 2026-11-03. Stored by create-upload clamped to [trim_start_seconds, duration_seconds]; the video duration when absent."
+    },
+    {
+     "key": "content_disclosure",
+     "type": "boolean",
+     "size": null,
+     "elements": null,
+     "required": false,
+     "default": false,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Branded-content/ad disclosure checkbox from the post screen, added 2026-11-03. Stored by create-upload exactly as sent (true only when the client sends true); false when absent."
+    },
+    {
+     "key": "link_url",
+     "type": "string",
+     "size": 300,
+     "elements": null,
+     "required": false,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Optional link from the post screen (Add link), added 2026-11-03. Trimmed and sliced to 300 chars by create-upload; null when absent/empty."
+    },
+    {
+     "key": "storage_provider",
+     "type": "string",
+     "size": 32,
+     "elements": null,
+     "required": false,
+     "default": "appwrite",
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Supabase default was 'supabase'. Retained for client compatibility."
+    },
+    {
+     "key": "storage_path",
+     "type": "string",
+     "size": 512,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Appwrite file $id in media bucket, NOT a filesystem path. Appwrite Storage has no folders."
+    },
+    {
+     "key": "thumbnail_path",
+     "type": "string",
+     "size": 2048,
+     "elements": null,
+     "required": false,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Appwrite file $id in media bucket, or an external URL."
+    },
+    {
+     "key": "duration_seconds",
+     "type": "double",
+     "size": null,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": 0,
+     "max": 20.5,
+     "notes": "Bounds inclusive in schema; >0 enforced by create-upload function."
+    },
+    {
+     "key": "size_bytes",
+     "type": "integer",
+     "size": null,
+     "elements": null,
+     "required": false,
+     "default": null,
+     "array": false,
+     "min": 0,
+     "max": 26214400,
+     "notes": "25 MiB ceiling."
+    },
+    {
+     "key": "visibility",
+     "type": "enum",
+     "size": null,
+     "elements": [
+      "public",
+      "followers",
+      "private"
+     ],
+     "required": false,
+     "default": "public",
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "moderation_status",
+     "type": "enum",
+     "size": null,
+     "elements": [
+      "pending",
+      "approved",
+      "rejected",
+      "needs_review",
+      "draft"
+     ],
+     "required": false,
+     "default": "pending",
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "draft added by 0003. Direct publish (2026-11-03): create-upload sets non-draft posts to approved with published_at set, so they match the feed query immediately; no pending gate. pending is retained in the enum for legacy rows only and is never assigned to new uploads. rejected/needs_review are post-moderation only (api moderate-video). Only functions set statuses."
+    },
+    {
+     "key": "rejection_reason",
+     "type": "string",
+     "size": 500,
+     "elements": null,
+     "required": false,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Set only by moderation action."
+    },
+    {
+     "key": "published_at",
+     "type": "datetime",
+     "size": null,
+     "elements": null,
+     "required": false,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Set by create-upload on direct publish and by api publish-draft when a draft goes live; set by moderation action on first approval if empty. Never set by clients."
+    },
+    {
+     "key": "like_count",
+     "type": "integer",
+     "size": null,
+     "elements": null,
+     "required": false,
+     "default": 0,
+     "array": false,
+     "min": 0,
+     "max": null,
+     "notes": "Maintained ONLY by events function recount. Clients never write it."
+    },
+    {
+     "key": "comment_count",
+     "type": "integer",
+     "size": null,
+     "elements": null,
+     "required": false,
+     "default": 0,
+     "array": false,
+     "min": 0,
+     "max": null,
+     "notes": "Maintained ONLY by events function recount. Clients never write it."
+    },
+    {
+     "key": "view_count",
+     "type": "integer",
+     "size": null,
+     "elements": null,
+     "required": false,
+     "default": 0,
+     "array": false,
+     "min": 0,
+     "max": null,
+     "notes": "Maintained ONLY by api increment-view action. Clients never write it."
+    },
+    {
+     "key": "filter",
+     "type": "enum",
+     "size": null,
+     "elements": [
+      "normal",
+      "warm",
+      "cool",
+      "mono",
+      "vivid"
+     ],
+     "required": false,
+     "default": "normal",
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "poll_question",
+     "type": "string",
+     "size": 80,
+     "elements": null,
+     "required": false,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Poll JSONB decomposed: all three poll_* set together or none, enforced by create-upload."
+    },
+    {
+     "key": "poll_option_a",
+     "type": "string",
+     "size": 30,
+     "elements": null,
+     "required": false,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "First poll option."
+    },
+    {
+     "key": "poll_option_b",
+     "type": "string",
+     "size": 30,
+     "elements": null,
+     "required": false,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Second poll option."
+    },
+    {
+     "key": "duet_of",
+     "type": "string",
+     "size": 36,
+     "elements": null,
+     "required": false,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Video $id. Existence validated by create-upload; no FK."
+    },
+    {
+     "key": "reply_comment_id",
+     "type": "string",
+     "size": 36,
+     "elements": null,
+     "required": false,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Comment $id. Existence validated by create-upload; no FK."
+    },
+    {
+     "key": "reply_video_id",
+     "type": "string",
+     "size": 36,
+     "elements": null,
+     "required": false,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Derived by create-upload from reply_comment_id."
+    }
+   ],
+   "indexes": [
+    {
+     "key": "feed_idx",
+     "type": "key",
+     "attributes": [
+      "moderation_status",
+      "visibility"
+     ]
+    },
+    {
+     "key": "creator_idx",
+     "type": "key",
+     "attributes": [
+      "creator_id"
+     ]
+    },
+    {
+     "key": "creator_status_idx",
+     "type": "key",
+     "attributes": [
+      "creator_id",
+      "moderation_status"
+     ]
+    },
+    {
+     "key": "caption_search",
+     "type": "fulltext",
+     "attributes": [
+      "caption"
+     ]
+    }
+   ],
+   "notes": [
+    "No relationship attributes anywhere; references are plain string IDs.",
+    "Residual risk R2 (post-moderation context since direct publish, 2026-11-03): creator with document update permission can technically flip moderation_status via direct API call, e.g. restoring a removed (rejected) video to approved; backstopped by file permissions (a removed video stays unplayable until a function flips its file) and absence of a moderation_reviews row for the flip."
+   ]
+  },
+  {
+   "id": "video_categories",
+   "name": "video_categories",
+   "sourceTable": "video_categories (composite PK)",
+   "documentSecurity": true,
+   "documentIdRule": "Auto-generated ID (ID.unique()). Uniqueness enforced by unique index, not by document ID.",
+   "permissions": {
+    "create": [
+     "create(\"users\")"
+    ],
+    "read": [],
+    "update": [],
+    "delete": []
+   },
+   "documentPermissionsTemplate": {
+    "read": [
+     "read(\"any\")"
+    ],
+    "update": [],
+    "delete": []
+   },
+   "attributes": [
+    {
+     "key": "video_id",
+     "type": "string",
+     "size": 36,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "category_id",
+     "type": "string",
+     "size": 64,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Category SLUG, not a number."
+    }
+   ],
+   "indexes": [
+    {
+     "key": "video_category_unique",
+     "type": "unique",
+     "attributes": [
+      "video_id",
+      "category_id"
+     ]
+    },
+    {
+     "key": "category_idx",
+     "type": "key",
+     "attributes": [
+      "category_id"
+     ]
+    }
+   ],
+   "notes": [
+    "No new rows since direct publish (2026-11-03): create-upload no longer accepts category_ids or creates links. Collection retained for the Discover page and legacy rows; delete-video / delete-account still clean up legacy rows. Client create entry is a fallback only."
+   ]
+  },
+  {
+   "id": "follows",
+   "name": "follows",
+   "sourceTable": "follows (composite PK, follower_id <> following_id)",
+   "documentSecurity": true,
+   "documentIdRule": "Auto-generated ID (ID.unique()).",
+   "permissions": {
+    "create": [
+     "create(\"users\")"
+    ],
+    "read": [
+     "read(\"any\")"
+    ],
+    "update": [],
+    "delete": []
+   },
+   "documentPermissionsTemplate": {
+    "read": [
+     "read(\"any\")"
+    ],
+    "update": [],
+    "delete": [
+     "delete(\"user:{followerId}\")"
+    ]
+   },
+   "attributes": [
+    {
+     "key": "follower_id",
+     "type": "string",
+     "size": 36,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "following_id",
+     "type": "string",
+     "size": 36,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Self-follow rejected by client validation only; no server CHECK."
+    }
+   ],
+   "indexes": [
+    {
+     "key": "follow_unique",
+     "type": "unique",
+     "attributes": [
+      "follower_id",
+      "following_id"
+     ]
+    },
+    {
+     "key": "following_idx",
+     "type": "key",
+     "attributes": [
+      "following_id"
+     ]
+    },
+    {
+     "key": "follower_idx",
+     "type": "key",
+     "attributes": [
+      "follower_id"
+     ]
+    }
+   ],
+   "notes": [
+    "Follow rows publicly readable (counts), mirroring SQL follows_read_counts."
+   ]
+  },
+  {
+   "id": "video_likes",
+   "name": "video_likes",
+   "sourceTable": "video_likes (composite PK)",
+   "documentSecurity": true,
+   "documentIdRule": "Auto-generated ID (ID.unique()).",
+   "permissions": {
+    "create": [
+     "create(\"users\")"
+    ],
+    "read": [
+     "read(\"any\")"
+    ],
+    "update": [],
+    "delete": []
+   },
+   "documentPermissionsTemplate": {
+    "read": [
+     "read(\"any\")"
+    ],
+    "update": [],
+    "delete": [
+     "delete(\"user:{ownerId}\")"
+    ]
+   },
+   "attributes": [
+    {
+     "key": "user_id",
+     "type": "string",
+     "size": 36,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "video_id",
+     "type": "string",
+     "size": 36,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    }
+   ],
+   "indexes": [
+    {
+     "key": "like_unique",
+     "type": "unique",
+     "attributes": [
+      "user_id",
+      "video_id"
+     ]
+    },
+    {
+     "key": "video_idx",
+     "type": "key",
+     "attributes": [
+      "video_id"
+     ]
+    }
+   ],
+   "notes": [
+    "like_count on videos recomputed by events function; clients never write it."
+   ]
+  },
+  {
+   "id": "comments",
+   "name": "comments",
+   "sourceTable": "comments (0001 + 0003 is_pinned)",
+   "documentSecurity": true,
+   "documentIdRule": "Auto-generated ID (ID.unique()).",
+   "permissions": {
+    "create": [
+     "create(\"users\")"
+    ],
+    "read": [],
+    "update": [],
+    "delete": []
+   },
+   "documentPermissionsTemplate": {
+    "visible": {
+     "read": [
+      "read(\"any\")"
+     ],
+     "update": [
+      "update(\"user:{authorId}\")",
+      "update(\"team:admins\")"
+     ],
+     "delete": [
+      "delete(\"user:{authorId}\")",
+      "delete(\"team:admins\")"
+     ]
+    },
+    "hiddenOrRemoved": {
+     "read": [
+      "read(\"user:{authorId}\")",
+      "read(\"team:admins\")"
+     ],
+     "update": [
+      "update(\"user:{authorId}\")",
+      "update(\"team:admins\")"
+     ],
+     "delete": [
+      "delete(\"user:{authorId}\")",
+      "delete(\"team:admins\")"
+     ]
+    },
+    "note": "Template flip performed by api moderate-comment action together with status change. Clients may only create visible."
+   },
+   "attributes": [
+    {
+     "key": "video_id",
+     "type": "string",
+     "size": 36,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "user_id",
+     "type": "string",
+     "size": 36,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "body",
+     "type": "string",
+     "size": 500,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "1-500 chars; empty rejected by client validation only."
+    },
+    {
+     "key": "moderation_status",
+     "type": "enum",
+     "size": null,
+     "elements": [
+      "visible",
+      "hidden",
+      "removed"
+     ],
+     "required": false,
+     "default": "visible",
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "is_pinned",
+     "type": "boolean",
+     "size": null,
+     "elements": null,
+     "required": false,
+     "default": false,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Only api set-comment-pin changes this; one pin per video."
+    }
+   ],
+   "indexes": [
+    {
+     "key": "video_status_idx",
+     "type": "key",
+     "attributes": [
+      "video_id",
+      "moderation_status"
+     ]
+    },
+    {
+     "key": "user_idx",
+     "type": "key",
+     "attributes": [
+      "user_id"
+     ]
+    },
+    {
+     "key": "video_pin_idx",
+     "type": "key",
+     "attributes": [
+      "video_id",
+      "is_pinned"
+     ]
+    }
+   ],
+   "notes": []
+  },
+  {
+   "id": "saved_videos",
+   "name": "saved_videos",
+   "sourceTable": "saved_videos (composite PK)",
+   "documentSecurity": true,
+   "documentIdRule": "Auto-generated ID (ID.unique()).",
+   "permissions": {
+    "create": [
+     "create(\"users\")"
+    ],
+    "read": [],
+    "update": [],
+    "delete": []
+   },
+   "documentPermissionsTemplate": {
+    "read": [
+     "read(\"user:{ownerId}\")"
+    ],
+    "update": [],
+    "delete": [
+     "delete(\"user:{ownerId}\")"
+    ]
+   },
+   "attributes": [
+    {
+     "key": "user_id",
+     "type": "string",
+     "size": 36,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "video_id",
+     "type": "string",
+     "size": 36,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    }
+   ],
+   "indexes": [
+    {
+     "key": "save_unique",
+     "type": "unique",
+     "attributes": [
+      "user_id",
+      "video_id"
+     ]
+    }
+   ],
+   "notes": [
+    "Strictly owner-only including read, unlike follows/likes."
+   ]
+  },
+  {
+   "id": "blocked_users",
+   "name": "blocked_users",
+   "sourceTable": "blocked_users (composite PK, blocker_id <> blocked_id)",
+   "documentSecurity": true,
+   "documentIdRule": "Auto-generated ID (ID.unique()).",
+   "permissions": {
+    "create": [
+     "create(\"users\")"
+    ],
+    "read": [],
+    "update": [],
+    "delete": []
+   },
+   "documentPermissionsTemplate": {
+    "read": [
+     "read(\"user:{blockerId}\")"
+    ],
+    "update": [],
+    "delete": [
+     "delete(\"user:{blockerId}\")"
+    ]
+   },
+   "attributes": [
+    {
+     "key": "blocker_id",
+     "type": "string",
+     "size": 36,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "blocked_id",
+     "type": "string",
+     "size": 36,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Self-block rejected by client validation only."
+    }
+   ],
+   "indexes": [
+    {
+     "key": "block_unique",
+     "type": "unique",
+     "attributes": [
+      "blocker_id",
+      "blocked_id"
+     ]
+    }
+   ],
+   "notes": [
+    "Strictly blocker-only."
+   ]
+  },
+  {
+   "id": "notifications",
+   "name": "notifications",
+   "sourceTable": "notifications",
+   "documentSecurity": true,
+   "documentIdRule": "Auto-generated ID (ID.unique()).",
+   "permissions": {
+    "create": [
+     "create(\"users\")"
+    ],
+    "read": [],
+    "update": [],
+    "delete": []
+   },
+   "documentPermissionsTemplate": {
+    "read": [
+     "read(\"user:{addresseeId}\")"
+    ],
+    "update": [
+     "update(\"user:{addresseeId}\")"
+    ],
+    "delete": [
+     "delete(\"user:{addresseeId}\")"
+    ]
+   },
+   "attributes": [
+    {
+     "key": "user_id",
+     "type": "string",
+     "size": 36,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "The ADDRESSEE, not the actor."
+    },
+    {
+     "key": "type",
+     "type": "enum",
+     "size": null,
+     "elements": [
+      "follow",
+      "like",
+      "comment",
+      "moderation",
+      "system",
+      "share",
+      "mention"
+     ],
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "actor_id",
+     "type": "string",
+     "size": 36,
+     "elements": null,
+     "required": false,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Empty for system notifications."
+    },
+    {
+     "key": "video_id",
+     "type": "string",
+     "size": 36,
+     "elements": null,
+     "required": false,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "comment_id",
+     "type": "string",
+     "size": 36,
+     "elements": null,
+     "required": false,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "is_read",
+     "type": "boolean",
+     "size": null,
+     "elements": null,
+     "required": false,
+     "default": false,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    }
+   ],
+   "indexes": [
+    {
+     "key": "user_idx",
+     "type": "key",
+     "attributes": [
+      "user_id"
+     ]
+    }
+   ],
+   "notes": [
+    "DEVIATION G2: SQL 0002 defines NO user insert policy, but the live store inserts client-side (share/mentions/verification notice). This spec grants create to authenticated users. MUST VERIFY in first live run whether a client can attach read permission for a different user; fallback is api notify action."
+   ]
+  },
+  {
+   "id": "reports",
+   "name": "reports",
+   "sourceTable": "reports",
+   "documentSecurity": true,
+   "documentIdRule": "Auto-generated ID (ID.unique()).",
+   "permissions": {
+    "create": [
+     "create(\"users\")"
+    ],
+    "read": [],
+    "update": [],
+    "delete": []
+   },
+   "documentPermissionsTemplate": {
+    "read": [
+     "read(\"user:{reporterId}\")",
+     "read(\"team:admins\")"
+    ],
+    "update": [
+     "update(\"team:admins\")"
+    ],
+    "delete": [
+     "delete(\"team:admins\")"
+    ]
+   },
+   "attributes": [
+    {
+     "key": "reporter_id",
+     "type": "string",
+     "size": 36,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "target_type",
+     "type": "enum",
+     "size": null,
+     "elements": [
+      "video",
+      "comment",
+      "user",
+      "sound"
+     ],
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "\"sound\" added 2026-11-03 for api report-sound (target_id = sounds row $id). file-report accepts video, comment, user, and sound."
+    },
+    {
+     "key": "target_id",
+     "type": "string",
+     "size": 36,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "No FK."
+    },
+    {
+     "key": "reason",
+     "type": "string",
+     "size": 500,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "3-500 chars in SQL; minimum client-enforced only."
+    },
+    {
+     "key": "status",
+     "type": "enum",
+     "size": null,
+     "elements": [
+      "open",
+      "reviewed",
+      "dismissed"
+     ],
+     "required": false,
+     "default": "open",
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Clients may only create open. Status changes via api decide-report."
+    }
+   ],
+   "indexes": [
+    {
+     "key": "status_idx",
+     "type": "key",
+     "attributes": [
+      "status"
+     ]
+    },
+    {
+     "key": "reporter_idx",
+     "type": "key",
+     "attributes": [
+      "reporter_id"
+     ]
+    }
+   ],
+   "notes": [
+    "Same cross-user/team grant caveat as notifications; fallback is api file-report action."
+   ]
+  },
+  {
+   "id": "moderation_reviews",
+   "name": "moderation_reviews",
+   "sourceTable": "moderation_reviews",
+   "documentSecurity": false,
+   "documentIdRule": "Auto-generated ID (ID.unique()).",
+   "permissions": {
+    "create": [
+     "create(\"team:admins\")"
+    ],
+    "read": [
+     "read(\"team:admins\")"
+    ],
+    "update": [
+     "update(\"team:admins\")"
+    ],
+    "delete": [
+     "delete(\"team:admins\")"
+    ]
+   },
+   "documentPermissionsTemplate": null,
+   "attributes": [
+    {
+     "key": "video_id",
+     "type": "string",
+     "size": 36,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "reviewer_id",
+     "type": "string",
+     "size": 36,
+     "elements": null,
+     "required": false,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Null when reviewer account deleted (ON DELETE SET NULL); delete-account nulls this explicitly."
+    },
+    {
+     "key": "decision",
+     "type": "enum",
+     "size": null,
+     "elements": [
+      "approved",
+      "rejected",
+      "needs_review"
+     ],
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "reason",
+     "type": "string",
+     "size": 1000,
+     "elements": null,
+     "required": false,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    }
+   ],
+   "indexes": [
+    {
+     "key": "video_idx",
+     "type": "key",
+     "attributes": [
+      "video_id"
+     ]
+    }
+   ],
+   "notes": [
+    "Normally written by api moderation action with API key."
+   ]
+  },
+  {
+   "id": "moderation_events",
+   "name": "moderation_events",
+   "sourceTable": "moderation_events",
+   "documentSecurity": false,
+   "documentIdRule": "Auto-generated ID (ID.unique()).",
+   "permissions": {
+    "create": [
+     "create(\"team:admins\")"
+    ],
+    "read": [
+     "read(\"team:admins\")"
+    ],
+    "update": [
+     "update(\"team:admins\")"
+    ],
+    "delete": [
+     "delete(\"team:admins\")"
+    ]
+   },
+   "documentPermissionsTemplate": null,
+   "attributes": [
+    {
+     "key": "video_id",
+     "type": "string",
+     "size": 36,
+     "elements": null,
+     "required": false,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Empty for non-video events."
+    },
+    {
+     "key": "event_type",
+     "type": "string",
+     "size": 64,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Free text in SQL; no enum so new event types need no schema change."
+    },
+    {
+     "key": "details",
+     "type": "string",
+     "size": 2000,
+     "elements": null,
+     "required": false,
+     "default": "{}",
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "JSON-encoded object; Appwrite has no JSON attribute type. SQL jsonb default {} preserved as string."
+    }
+   ],
+   "indexes": [
+    {
+     "key": "video_idx",
+     "type": "key",
+     "attributes": [
+      "video_id"
+     ]
+    }
+   ],
+   "notes": [
+    "Written by functions with API key. Clients never write here."
+   ]
+  },
+  {
+   "id": "admin_actions",
+   "name": "admin_actions",
+   "sourceTable": "admin_actions",
+   "documentSecurity": false,
+   "documentIdRule": "Auto-generated ID (ID.unique()).",
+   "permissions": {
+    "create": [
+     "create(\"team:admins/admin\")"
+    ],
+    "read": [
+     "read(\"team:admins/admin\")"
+    ],
+    "update": [
+     "update(\"team:admins/admin\")"
+    ],
+    "delete": [
+     "delete(\"team:admins/admin\")"
+    ]
+   },
+   "documentPermissionsTemplate": null,
+   "attributes": [
+    {
+     "key": "admin_id",
+     "type": "string",
+     "size": 36,
+     "elements": null,
+     "required": false,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "action",
+     "type": "string",
+     "size": 128,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Free text in SQL."
+    },
+    {
+     "key": "target_type",
+     "type": "string",
+     "size": 32,
+     "elements": null,
+     "required": false,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "target_id",
+     "type": "string",
+     "size": 36,
+     "elements": null,
+     "required": false,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "details",
+     "type": "string",
+     "size": 2000,
+     "elements": null,
+     "required": false,
+     "default": "{}",
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "JSON-encoded object."
+    }
+   ],
+   "indexes": [
+    {
+     "key": "admin_idx",
+     "type": "key",
+     "attributes": [
+      "admin_id"
+     ]
+    }
+   ],
+   "notes": [
+    "Admin team role only via team:admins/admin strings. If Console picker cannot express team-role restriction, use team:admins and record it; never loosen to users/any."
+   ]
+  },
+  {
+   "id": "user_preferences",
+   "name": "user_preferences",
+   "sourceTable": "user_preferences (0001 + allow_* / view_follow_list)",
+   "documentSecurity": true,
+   "documentIdRule": "Document $id = Auth user $id (one row per user, mirroring SQL PK on user_id).",
+   "permissions": {
+    "create": [
+     "create(\"users\")"
+    ],
+    "read": [],
+    "update": [],
+    "delete": []
+   },
+   "documentPermissionsTemplate": {
+    "read": [
+     "read(\"user:{ownerId}\")"
+    ],
+    "update": [
+     "update(\"user:{ownerId}\")"
+    ],
+    "delete": [
+     "delete(\"user:{ownerId}\")"
+    ]
+   },
+   "attributes": [
+    {
+     "key": "user_id",
+     "type": "string",
+     "size": 36,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Always equal to document $id."
+    },
+    {
+     "key": "category_ids",
+     "type": "string",
+     "size": 64,
+     "elements": null,
+     "required": false,
+     "default": [],
+     "array": true,
+     "min": null,
+     "max": null,
+     "notes": "Array attribute. Stores category SLUGS, not numbers. Discover-page preference only since 2026-11-03; the upload flow no longer reads or writes it."
+    },
+    {
+     "key": "notify_likes",
+     "type": "boolean",
+     "size": null,
+     "elements": null,
+     "required": false,
+     "default": true,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "notify_comments",
+     "type": "boolean",
+     "size": null,
+     "elements": null,
+     "required": false,
+     "default": true,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "notify_follows",
+     "type": "boolean",
+     "size": null,
+     "elements": null,
+     "required": false,
+     "default": true,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "allow_comment",
+     "type": "enum",
+     "size": null,
+     "elements": [
+      "everyone",
+      "followers",
+      "nobody"
+     ],
+     "required": false,
+     "default": "everyone",
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "SQL had no CHECK; enum from values the app actually uses."
+    },
+    {
+     "key": "allow_mention",
+     "type": "enum",
+     "size": null,
+     "elements": [
+      "everyone",
+      "followers",
+      "nobody"
+     ],
+     "required": false,
+     "default": "everyone",
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "allow_like",
+     "type": "enum",
+     "size": null,
+     "elements": [
+      "everyone",
+      "followers",
+      "nobody"
+     ],
+     "required": false,
+     "default": "everyone",
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "allow_download",
+     "type": "enum",
+     "size": null,
+     "elements": [
+      "everyone",
+      "followers",
+      "nobody"
+     ],
+     "required": false,
+     "default": "everyone",
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "view_follow_list",
+     "type": "enum",
+     "size": null,
+     "elements": [
+      "everyone",
+      "followers",
+      "nobody"
+     ],
+     "required": false,
+     "default": "everyone",
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    }
+   ],
+   "indexes": [
+    {
+     "key": "user_unique",
+     "type": "unique",
+     "attributes": [
+      "user_id"
+     ]
+    }
+   ],
+   "notes": [
+    "Strictly owner-only. Cross-user gate reads (getAllowPrefs) must move into api check-allow-prefs; do not widen to public read."
+   ]
+  },
+  {
+   "id": "watch_history",
+   "name": "watch_history",
+   "sourceTable": "watch_history (composite PK)",
+   "documentSecurity": true,
+   "documentIdRule": "Auto-generated ID (ID.unique()). Upsert = query-then-update/create; 409 means row exists.",
+   "permissions": {
+    "create": [
+     "create(\"users\")"
+    ],
+    "read": [],
+    "update": [],
+    "delete": []
+   },
+   "documentPermissionsTemplate": {
+    "read": [
+     "read(\"user:{ownerId}\")"
+    ],
+    "update": [
+     "update(\"user:{ownerId}\")"
+    ],
+    "delete": [
+     "delete(\"user:{ownerId}\")"
+    ]
+   },
+   "attributes": [
+    {
+     "key": "user_id",
+     "type": "string",
+     "size": 36,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "video_id",
+     "type": "string",
+     "size": 36,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "watched_at",
+     "type": "datetime",
+     "size": null,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Distinct updatable timestamp read by the app; kept as a real attribute (exception to the $createdAt rule)."
+    }
+   ],
+   "indexes": [
+    {
+     "key": "watch_unique",
+     "type": "unique",
+     "attributes": [
+      "user_id",
+      "video_id"
+     ]
+    }
+   ],
+   "notes": []
+  },
+  {
+   "id": "account_events",
+   "name": "account_events",
+   "sourceTable": "account_events",
+   "documentSecurity": true,
+   "documentIdRule": "Auto-generated ID (ID.unique()).",
+   "permissions": {
+    "create": [
+     "create(\"users\")"
+    ],
+    "read": [],
+    "update": [],
+    "delete": []
+   },
+   "documentPermissionsTemplate": {
+    "read": [
+     "read(\"user:{ownerId}\")"
+    ],
+    "update": [],
+    "delete": []
+   },
+   "attributes": [
+    {
+     "key": "user_id",
+     "type": "string",
+     "size": 36,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "type",
+     "type": "string",
+     "size": 64,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Free text in SQL."
+    },
+    {
+     "key": "detail",
+     "type": "string",
+     "size": 1000,
+     "elements": null,
+     "required": false,
+     "default": "",
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    }
+   ],
+   "indexes": [
+    {
+     "key": "user_idx",
+     "type": "key",
+     "attributes": [
+      "user_id"
+     ]
+    }
+   ],
+   "notes": [
+    "Append-only, owner-readable. No update/delete in SQL design."
+   ]
+  },
+  {
+   "id": "verification_requests",
+   "name": "verification_requests",
+   "sourceTable": "verification_requests",
+   "documentSecurity": true,
+   "documentIdRule": "Auto-generated ID (ID.unique()).",
+   "permissions": {
+    "create": [
+     "create(\"users\")"
+    ],
+    "read": [],
+    "update": [],
+    "delete": []
+   },
+   "documentPermissionsTemplate": {
+    "read": [
+     "read(\"user:{applicantId}\")",
+     "read(\"team:admins\")"
+    ],
+    "update": [
+     "update(\"team:admins\")"
+    ],
+    "delete": [
+     "delete(\"team:admins\")"
+    ]
+   },
+   "attributes": [
+    {
+     "key": "user_id",
+     "type": "string",
+     "size": 36,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "full_name",
+     "type": "string",
+     "size": 80,
+     "elements": null,
+     "required": false,
+     "default": "",
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "category",
+     "type": "string",
+     "size": 64,
+     "elements": null,
+     "required": false,
+     "default": "Creator",
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Free text in SQL."
+    },
+    {
+     "key": "note",
+     "type": "string",
+     "size": 300,
+     "elements": null,
+     "required": false,
+     "default": "",
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "payment_method",
+     "type": "string",
+     "size": 32,
+     "elements": null,
+     "required": false,
+     "default": "JazzCash",
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "payment_tid",
+     "type": "string",
+     "size": 128,
+     "elements": null,
+     "required": false,
+     "default": "",
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "App requires >=6 chars; client validation."
+    },
+    {
+     "key": "status",
+     "type": "enum",
+     "size": null,
+     "elements": [
+      "pending",
+      "approved",
+      "rejected"
+     ],
+     "required": false,
+     "default": "pending",
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Clients may only create pending. Decisions via api decide-verification."
+    },
+    {
+     "key": "decided_at",
+     "type": "datetime",
+     "size": null,
+     "elements": null,
+     "required": false,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Set by decision action."
+    },
+    {
+     "key": "decided_by",
+     "type": "string",
+     "size": 36,
+     "elements": null,
+     "required": false,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Moderator/admin Auth ID."
+    }
+   ],
+   "indexes": [
+    {
+     "key": "user_status_idx",
+     "type": "key",
+     "attributes": [
+      "user_id",
+      "status"
+     ]
+    },
+    {
+     "key": "status_idx",
+     "type": "key",
+     "attributes": [
+      "status"
+     ]
+    }
+   ],
+   "notes": [
+    "One-pending-request rule has no schema enforcement; client check + decision flow carry it."
+   ]
+  },
+  {
+   "id": "messages",
+   "name": "messages",
+   "sourceTable": "messages (sender_id <> recipient_id)",
+   "documentSecurity": true,
+   "documentIdRule": "Auto-generated ID (ID.unique()).",
+   "permissions": {
+    "create": [
+     "create(\"users\")"
+    ],
+    "read": [],
+    "update": [],
+    "delete": []
+   },
+   "documentPermissionsTemplate": {
+    "read": [
+     "read(\"user:{senderId}\")",
+     "read(\"user:{recipientId}\")"
+    ],
+    "update": [
+     "update(\"user:{recipientId}\")"
+    ],
+    "delete": [],
+    "note": "Sender MUST attach these exact permissions at creation; default creator-only permissions would hide the message from the recipient. Same grant caveat as notifications; verify in first live run."
+   },
+   "attributes": [
+    {
+     "key": "sender_id",
+     "type": "string",
+     "size": 36,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "recipient_id",
+     "type": "string",
+     "size": 36,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Self-message rejected by client validation only."
+    },
+    {
+     "key": "body",
+     "type": "string",
+     "size": 1000,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "1-1000 chars; client validation."
+    },
+    {
+     "key": "is_read",
+     "type": "boolean",
+     "size": null,
+     "elements": null,
+     "required": false,
+     "default": false,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    }
+   ],
+   "indexes": [
+    {
+     "key": "pair_idx",
+     "type": "key",
+     "attributes": [
+      "sender_id",
+      "recipient_id"
+     ]
+    },
+    {
+     "key": "recipient_read_idx",
+     "type": "key",
+     "attributes": [
+      "recipient_id",
+      "is_read"
+     ]
+    }
+   ],
+   "notes": [
+    "Recipient is the only updater (mark-read), mirroring SQL."
+   ]
+  },
+  {
+   "id": "comment_likes",
+   "name": "comment_likes",
+   "sourceTable": "comment_likes (composite PK, 0003)",
+   "documentSecurity": true,
+   "documentIdRule": "Auto-generated ID (ID.unique()).",
+   "permissions": {
+    "create": [
+     "create(\"users\")"
+    ],
+    "read": [
+     "read(\"any\")"
+    ],
+    "update": [],
+    "delete": []
+   },
+   "documentPermissionsTemplate": {
+    "read": [
+     "read(\"any\")"
+    ],
+    "update": [],
+    "delete": [
+     "delete(\"user:{ownerId}\")"
+    ]
+   },
+   "attributes": [
+    {
+     "key": "comment_id",
+     "type": "string",
+     "size": 36,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "user_id",
+     "type": "string",
+     "size": 36,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    }
+   ],
+   "indexes": [
+    {
+     "key": "comment_like_unique",
+     "type": "unique",
+     "attributes": [
+      "comment_id",
+      "user_id"
+     ]
+    }
+   ],
+   "notes": [
+    "Like counts computed client-side by counting rows; no counter attribute on comments."
+   ]
+  },
+  {
+   "id": "poll_votes",
+   "name": "poll_votes",
+   "sourceTable": "poll_votes (composite PK, choice in (0,1), 0003)",
+   "documentSecurity": true,
+   "documentIdRule": "Auto-generated ID (ID.unique()).",
+   "permissions": {
+    "create": [
+     "create(\"users\")"
+    ],
+    "read": [
+     "read(\"any\")"
+    ],
+    "update": [],
+    "delete": []
+   },
+   "documentPermissionsTemplate": {
+    "read": [
+     "read(\"any\")"
+    ],
+    "update": [
+     "update(\"user:{ownerId}\")"
+    ],
+    "delete": [
+     "delete(\"user:{ownerId}\")"
+    ]
+   },
+   "attributes": [
+    {
+     "key": "video_id",
+     "type": "string",
+     "size": 36,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "user_id",
+     "type": "string",
+     "size": 36,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "choice",
+     "type": "integer",
+     "size": null,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": 0,
+     "max": 1,
+     "notes": "Attribute bounds enforce SQL CHECK."
+    }
+   ],
+   "indexes": [
+    {
+     "key": "poll_vote_unique",
+     "type": "unique",
+     "attributes": [
+      "video_id",
+      "user_id"
+     ]
+    }
+   ],
+   "notes": [
+    "Re-vote = query-then-update; 409 on create means row exists."
+   ]
+  },
+  {
+   "id": "stories",
+   "name": "stories",
+   "sourceTable": "stories (0003)",
+   "documentSecurity": true,
+   "documentIdRule": "Auto-generated ID (ID.unique()).",
+   "permissions": {
+    "create": [
+     "create(\"users\")"
+    ],
+    "read": [],
+    "update": [],
+    "delete": []
+   },
+   "documentPermissionsTemplate": {
+    "pendingOrRejected": {
+     "read": [
+      "read(\"user:{ownerId}\")",
+      "read(\"team:admins\")"
+     ],
+     "update": [
+      "update(\"user:{ownerId}\")",
+      "update(\"team:admins\")"
+     ],
+     "delete": [
+      "delete(\"user:{ownerId}\")",
+      "delete(\"team:admins\")"
+     ]
+    },
+    "approved": {
+     "read": [
+      "read(\"any\")"
+     ],
+     "update": [
+      "update(\"user:{ownerId}\")",
+      "update(\"team:admins\")"
+     ],
+     "delete": [
+      "delete(\"user:{ownerId}\")",
+      "delete(\"team:admins\")"
+     ]
+    },
+    "note": "Flip only inside api moderate-story action, together with story file flip. 24h expiry is a query filter ($createdAt within 24h), not a permission (residual risk R3)."
+   },
+   "attributes": [
+    {
+     "key": "user_id",
+     "type": "string",
+     "size": 36,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "media_type",
+     "type": "enum",
+     "size": null,
+     "elements": [
+      "image",
+      "video"
+     ],
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "storage_path",
+     "type": "string",
+     "size": 512,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Appwrite file $id in media bucket, not a path."
+    },
+    {
+     "key": "caption",
+     "type": "string",
+     "size": 200,
+     "elements": null,
+     "required": false,
+     "default": "",
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "duration_seconds",
+     "type": "double",
+     "size": null,
+     "elements": null,
+     "required": false,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Null for images. No 20.5s cap in SQL for stories."
+    },
+    {
+     "key": "moderation_status",
+     "type": "enum",
+     "size": null,
+     "elements": [
+      "pending",
+      "approved",
+      "rejected"
+     ],
+     "required": false,
+     "default": "pending",
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "No draft status for stories in SQL."
+    }
+   ],
+   "indexes": [
+    {
+     "key": "user_status_idx",
+     "type": "key",
+     "attributes": [
+      "user_id",
+      "moderation_status"
+     ]
+    },
+    {
+     "key": "status_idx",
+     "type": "key",
+     "attributes": [
+      "moderation_status"
+     ]
+    }
+   ],
+   "notes": []
+  },
+  {
+   "id": "story_views",
+   "name": "story_views",
+   "sourceTable": "story_views (composite PK, 0003)",
+   "documentSecurity": true,
+   "documentIdRule": "Auto-generated ID (ID.unique()).",
+   "permissions": {
+    "create": [
+     "create(\"users\")"
+    ],
+    "read": [],
+    "update": [],
+    "delete": []
+   },
+   "documentPermissionsTemplate": {
+    "read": [
+     "read(\"user:{ownerId}\")"
+    ],
+    "update": [],
+    "delete": [
+     "delete(\"user:{ownerId}\")"
+    ]
+   },
+   "attributes": [
+    {
+     "key": "story_id",
+     "type": "string",
+     "size": 36,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "user_id",
+     "type": "string",
+     "size": 36,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    }
+   ],
+   "indexes": [
+    {
+     "key": "story_view_unique",
+     "type": "unique",
+     "attributes": [
+      "story_id",
+      "user_id"
+     ]
+    }
+   ],
+   "notes": [
+    "viewed_at dropped; $createdAt covers it. Strictly owner-only."
+   ]
+  },
+  {
+   "id": "public_profiles",
+   "name": "public_profiles",
+   "sourceTable": null,
+   "sourceView": "public_profiles view (0001 final form) + app usage",
+   "documentSecurity": false,
+   "documentIdRule": "Document $id MUST equal the Auth user $id (same as profiles).",
+   "permissions": {
+    "create": [],
+    "read": [
+     "read(\"any\")"
+    ],
+    "update": [],
+    "delete": []
+   },
+   "documentPermissionsTemplate": null,
+   "attributes": [
+    {
+     "key": "username",
+     "type": "string",
+     "size": 32,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Mirrors profiles.username."
+    },
+    {
+     "key": "display_name",
+     "type": "string",
+     "size": 60,
+     "elements": null,
+     "required": false,
+     "default": "",
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "bio",
+     "type": "string",
+     "size": 160,
+     "elements": null,
+     "required": false,
+     "default": "",
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "avatar_url",
+     "type": "string",
+     "size": 2048,
+     "elements": null,
+     "required": false,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "website",
+     "type": "string",
+     "size": 200,
+     "elements": null,
+     "required": false,
+     "default": "",
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": ""
+    },
+    {
+     "key": "verified",
+     "type": "boolean",
+     "size": null,
+     "elements": null,
+     "required": false,
+     "default": false,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Added beyond SQL view (app reads it from public-profile rows). Synced ONLY by api decide-verification, NEVER by profile-sync event."
+    },
+    {
+     "key": "private_account",
+     "type": "boolean",
+     "size": null,
+     "elements": null,
+     "required": false,
+     "default": false,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Added beyond SQL view (app reads it from getProfile + feed filtering). Synced by profile-sync event."
+    }
+   ],
+   "indexes": [
+    {
+     "key": "username_unique",
+     "type": "unique",
+     "attributes": [
+      "username"
+     ]
+    },
+    {
+     "key": "username_search",
+     "type": "fulltext",
+     "attributes": [
+      "username"
+     ]
+    }
+   ],
+   "notes": [
+    "NEW collection, not a source table. Synced by events function on profiles create/update/delete. NEVER sync role or is_suspended here; suspended users have NO public_profiles document.",
+    "Only functions with the API key write here. No client create/update/delete permission.",
+    "Tradeoff: eventually consistent (seconds of staleness); username-rename race leaves old public document in place and logs conflict for manual resolution."
+   ]
+  },
+  {
+   "id": "sounds",
+   "name": "sounds",
+   "sourceTable": null,
+   "sourceView": null,
+   "documentSecurity": true,
+   "documentIdRule": "Auto-generated ID (ID.unique()).",
+   "permissions": {
+    "create": [
+     "create(\"users\")"
+    ],
+    "read": [],
+    "update": [],
+    "delete": []
+   },
+   "documentPermissionsTemplate": {
+    "read": [
+     "read(\"any\")"
+    ],
+    "update": [
+     "update(\"team:admins\")"
+    ],
+    "delete": [
+     "delete(\"team:admins\")"
+    ]
+   },
+   "attributes": [
+    {
+     "key": "title",
+     "type": "string",
+     "size": 80,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Sound title shown in the library and on videos using the sound. Required; client rejects an empty title."
+    },
+    {
+     "key": "category",
+     "type": "enum",
+     "size": null,
+     "elements": [
+      "sound-effects",
+      "naat",
+      "taqreer",
+      "islamic",
+      "original"
+     ],
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Library tab: Sound Effects, Naat, Taqreer, Islamic. \"original\" added 2026-11-03 for auto-registered original sounds ONLY (create-upload); client add-sound forms must NOT offer it — create-sound rejects it. No music category exists."
+    },
+    {
+     "key": "duration_seconds",
+     "type": "double",
+     "size": null,
+     "elements": null,
+     "required": false,
+     "default": null,
+     "array": false,
+     "min": 0,
+     "max": null,
+     "notes": "Display metadata only; video duration enforcement (20.5s) never reads this."
+    },
+    {
+     "key": "storage_path",
+     "type": "string",
+     "size": 512,
+     "elements": null,
+     "required": true,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Appwrite file $id in the media bucket (audio file), or a playable URL. Required; client rejects an empty path. For original sounds, the source video's file $id."
+    },
+    {
+     "key": "source",
+     "type": "string",
+     "size": 120,
+     "elements": null,
+     "required": false,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Source/license note shown next to the sound (e.g. CC0/public-domain note, or Added by the owner). Client supplies it sliced to 120 chars. Original sounds carry \"Original sound from video\"."
+    },
+    {
+     "key": "creator_id",
+     "type": "string",
+     "size": 36,
+     "elements": null,
+     "required": false,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Auth user $id of the user/staff member who added the sound (create-sound) or the video creator (original sounds). Set by functions only; never accepted from a caller body. Null on rows created before 2026-11-03."
+    },
+    {
+     "key": "source_type",
+     "type": "enum",
+     "size": null,
+     "elements": [
+      "admin",
+      "user",
+      "original"
+     ],
+     "required": false,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Who added the row: \"admin\" = team staff via create-sound, \"user\" = signed-in user via create-sound, \"original\" = auto-registered by create-upload. Set by functions only. Null on rows created before 2026-11-03."
+    },
+    {
+     "key": "video_id",
+     "type": "string",
+     "size": 36,
+     "elements": null,
+     "required": false,
+     "default": null,
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "The source video for original sounds only (the video $id); null for library sounds. Keyed by video_id_idx for the create-upload dedupe lookup."
+    },
+    {
+     "key": "status",
+     "type": "enum",
+     "size": null,
+     "elements": [
+      "live",
+      "removed"
+     ],
+     "required": false,
+     "default": "live",
+     "array": false,
+     "min": null,
+     "max": null,
+     "notes": "Removal is a status flip, not a deletion: staff remove-sound sets \"removed\"; the row and its audio file are kept (audit trail + stable references). Clients list live sounds only."
+    },
+    {
+     "key": "report_count",
+     "type": "integer",
+     "size": null,
+     "elements": null,
+     "required": false,
+     "default": 0,
+     "array": false,
+     "min": 0,
+     "max": null,
+     "notes": "Best-effort count incremented by report-sound. Display/triage only; it never auto-hides a sound."
+    }
+   ],
+   "indexes": [
+    {
+     "key": "category_idx",
+     "type": "key",
+     "attributes": [
+      "category"
+     ]
+    },
+    {
+     "key": "video_id_idx",
+     "type": "key",
+     "attributes": [
+      "video_id"
+     ]
+    }
+   ],
+   "notes": [
+    "NEW collection (added 2026-11-03, sounds library; judgment call J13). The client implementation strictly requires structured metadata storage for owner-added sounds: the live store reads/writes this collection directly (listSounds / addSound / deleteSound). The built-in catalog is an empty client-side array; all owner-added sounds live here.",
+    "Reads are public (read any on every document) so any viewer can list and play catalog sounds. Updates/deletes are team:admins only via the document template.",
+    "R7 SUPERSEDED (owner decision 2026-11-03 ~23:35): \"users CAN add sounds, direct-to-library, NO admin approval; violations removed via report + strike.\" Any signed-in user creating sounds rows is now INTENTIONAL, not a residual risk: create-sound (signed-in) writes rows directly live with source_type \"user\" (\"admin\" for team staff), and the old R7 note is superseded — do NOT \"fix\" it by restricting creation. Removal is via report-sound + staff remove-sound, which flips status to \"removed\" instead of deleting the row/file.",
+    "ORIGINAL SOUNDS (added 2026-11-03): create-upload best-effort auto-registers a sounds row (category \"original\", source_type \"original\", video_id = source video $id) for every approved video posted with no sound_id. Dedupe is a video_id lookup before create (video_id_idx). video_id is deliberately NOT a unique index: many rows carry null video_id (library sounds), and Appwrite unique-index behaviour over nulls must not block those rows or reject the dedupe lookup; duplicates are prevented by the lookup, not by the index.",
+    "Audio files themselves live in the media bucket (mp3/m4a/wav/ogg, read any at upload). Deleting a sounds row does NOT delete its audio file; deleting a file does not remove the row. No cascade exists; the admin removes both by hand if needed. remove-sound deletes neither — it only flips status.",
+    "Honest content constraint: no naat/taqreer audio exists in the workspace. Rows must only be created for audio the owner owns or has rights to; Sound Effects rows only for verified CC0/public-domain effects with the license in source."
+   ]
+  }
+ ],
+ "viewsAsQueryPatterns": [
+  {
+   "view": "public_videos",
+   "isCollection": false,
+   "baseQuery": {
+    "collection": "videos",
+    "filters": [
+     {
+      "attribute": "moderation_status",
+      "operator": "equal",
+      "value": "approved"
+     },
+     {
+      "attribute": "visibility",
+      "operator": "equal",
+      "value": "public"
+     }
+    ],
+    "order": "published_at descending, fallback $createdAt descending",
+    "limit": 30,
+    "overFetchLimitWhenPostFiltering": 50
+   },
+   "clientJoin": "Fetch distinct creator_ids from public_profiles; merge username, display_name, avatar_url, verified onto each video (reproduces SQL JOIN profiles columns incl. p.verified from 0003).",
+   "clientPostFiltersInOrder": [
+    "Drop videos whose creator has no public_profiles document (reproduces p.is_suspended = false).",
+    "Private-account rule: if creator private_account is true and viewer is not the creator, keep only if a follows document exists (follower_id=viewer, following_id=creator). Guests drop all private-account creators' videos. Reproduces SQL: private_account=false OR creator=auth.uid() OR EXISTS(follows).",
+    "Blocked rule (app demo behaviour): drop videos whose creator the viewer blocked.",
+    "Following feed: query follows first for following_id list, add creator_id IN (...) to base query; empty list returns empty feed without querying videos."
+   ],
+   "fields": [
+    "id($id)",
+    "creator_id",
+    "caption",
+    "storage_provider",
+    "storage_path",
+    "thumbnail_path",
+    "duration_seconds",
+    "view_count",
+    "like_count",
+    "comment_count",
+    "published_at",
+    "$createdAt",
+    "filter",
+    "poll_question",
+    "poll_option_a",
+    "poll_option_b",
+    "duet_of",
+    "reply_comment_id",
+    "reply_video_id",
+    "username",
+    "display_name",
+    "avatar_url",
+    "verified"
+   ],
+   "notes": [
+    "Playback URLs built only from storage_path file IDs whose files carry read(any) (see buckets). A tampered approved document with an owner-only file is unplayable.",
+    "size_bytes, rejection_reason, moderation_status are NOT exposed by the view; clients must not rely on them from feed rows."
+   ]
+  },
+  {
+   "view": "public_profiles",
+   "isCollection": true,
+   "collectionId": "public_profiles",
+   "description": "Replaced by the synced public_profiles collection (see collections entry). Query it directly: by $id, by username equality, by fulltext search on username, or list with limit.",
+   "fields": [
+    "id($id)",
+    "username",
+    "display_name",
+    "bio",
+    "avatar_url",
+    "website",
+    "$createdAt",
+    "verified",
+    "private_account"
+   ],
+   "excludedFields": [
+    "role",
+    "is_suspended",
+    "email"
+   ],
+   "notes": [
+    "Suspended users are absent (no document). Never query profiles for another user's data."
+   ]
+  }
+ ],
+ "buckets": [
+  {
+   "id": "media",
+   "name": "Media",
+   "holds": [
+    "videos (Supabase videos bucket)",
+    "thumbnails (Supabase thumbnails bucket)",
+    "stories (Supabase stories bucket)",
+    "sounds-library catalog audio files (added 2026-11-03; see soundsLibrary)"
+   ],
+   "fileSecurity": true,
+   "permissions": {
+    "create": [
+     "create(\"users\")"
+    ],
+    "read": [],
+    "update": [],
+    "delete": []
+   },
+   "maxFileSizeBytes": 26214400,
+   "allowedExtensions": [
+    "mp4",
+    "mov",
+    "webm",
+    "jpg",
+    "jpeg",
+    "png",
+    "webp",
+    "gif",
+    "mp3",
+    "m4a",
+    "wav",
+    "ogg"
+   ],
+   "fileNameConvention": "videos-<uid>-<videoId>.mp4, thumbnails-<uid>-<videoId>.jpg, stories-<uid>-<storyId>.<ext>. Display name only; Appwrite Storage has no folders and enforcement never depends on the name.",
+   "filePermissionTemplates": {
+    "pendingDraftNeedsReviewRejected": {
+     "read": [
+      "read(\"user:{ownerId}\")",
+      "read(\"team:admins\")"
+     ],
+     "update": [
+      "update(\"user:{ownerId}\")",
+      "update(\"team:admins\")"
+     ],
+     "delete": [
+      "delete(\"user:{ownerId}\")",
+      "delete(\"team:admins\")"
+     ]
+    },
+    "approvedPublic": {
+     "read": [
+      "read(\"any\")"
+     ],
+     "update": [
+      "update(\"user:{ownerId}\")",
+      "update(\"team:admins\")"
+     ],
+     "delete": [
+      "delete(\"user:{ownerId}\")",
+      "delete(\"team:admins\")"
+     ]
+    },
+    "approvedFollowersOrPrivate": {
+     "read": [
+      "read(\"user:{ownerId}\")",
+      "read(\"team:admins\")"
+     ],
+     "update": [
+      "update(\"user:{ownerId}\")",
+      "update(\"team:admins\")"
+     ],
+     "delete": [
+      "delete(\"user:{ownerId}\")",
+      "delete(\"team:admins\")"
+     ]
+    },
+    "soundFile": {
+     "read": [
+      "read(\"any\")"
+     ],
+     "update": [
+      "update(\"user:{ownerId}\")",
+      "update(\"team:admins\")"
+     ],
+     "delete": [
+      "delete(\"user:{ownerId}\")",
+      "delete(\"team:admins\")"
+     ]
+    },
+    "note": "Thumbnail files mirror their video's template and flip in the same moderation call. Story files use the same templates with owner = story user_id. Sound files (sounds-library catalog audio, 2026-11-03) carry read(any) so any viewer can play a selected catalog sound; the admin sets these permissions at upload time (no function flips sound files). Flips happen ONLY in api moderation/suspend actions via API key. File view/download URLs respect file permissions; there is no separate signed-URL security layer."
+   },
+   "limitations": [
+    "Appwrite cannot enforce read-if-document-approved, follower-only read, 24h expiry, or path-prefix rules at the bucket/file level. Those remain document/query rules.",
+    "A guest who learns an approved file's ID can download it directly (that is what read(any) means)."
+   ]
+  },
+  {
+   "id": "avatars",
+   "name": "Avatars",
+   "holds": [
+    "avatars (Supabase avatars bucket) - future use only"
+   ],
+   "fileSecurity": true,
+   "permissions": {
+    "create": [
+     "create(\"users\")"
+    ],
+    "read": [
+     "read(\"any\")"
+    ],
+    "update": [],
+    "delete": []
+   },
+   "maxFileSizeBytes": 5242880,
+   "allowedExtensions": [
+    "jpg",
+    "jpeg",
+    "png",
+    "webp",
+    "gif"
+   ],
+   "fileNameConvention": null,
+   "filePermissionTemplates": {
+    "note": "No avatar upload path exists in the app today; avatar_url is a URL string. If an upload flow is added later: read any, update/delete user:owner."
+   },
+   "limitations": [
+    "Bucket kept for future use. No implementation worker should invent an avatar-upload flow from this spec alone."
+   ]
+  }
+ ],
+ "functions": [
+  {
+   "id": "api",
+   "name": "api",
+   "runtime": "node-22",
+   "runtimeVerified": "Appwrite runtimes docs page lists node-22 (and node-20.0) on 2026-11-02 crawl. If node-22 is unavailable in Console, use node-20.0 and record the substitution.",
+   "entrypoint": "src/main.js",
+   "trigger": "HTTP execution",
+   "executePermission": [
+    "execute(\"users\")"
+   ],
+   "timeoutSeconds": 30,
+   "envVars": [
+    "APPWRITE_ENDPOINT",
+    "APPWRITE_PROJECT_ID",
+    "APPWRITE_API_KEY"
+   ],
+   "envVarNotes": "APPWRITE_API_KEY is the §2 key, server-side only, set as a secret Function variable. Never in files or chat. Database ID tokisla is a code constant.",
+   "actions": [
+    {
+     "action": "create-profile",
+     "replaces": "Profile insert in signUp",
+     "checks": "Signed-in caller; documentId=callerId; username format + uniqueness; forces role=user, is_suspended=false, verified=false; attaches profiles template; idempotent."
+    },
+    {
+     "action": "increment-view",
+     "replaces": "RPC increment_video_view",
+     "checks": "Increments view_count by 1 only if moderation_status=approved. Guests: execution limited to users; guest views are best-effort."
+    },
+    {
+     "action": "publish-draft",
+     "replaces": "RPC publish_draft",
+     "checks": "Caller owns video AND status=draft; sets approved + published_at and flips document/file permissions to the live template (direct publish, 2026-11-03; no pending step). Logs a moderation_events published row."
+    },
+    {
+     "action": "set-comment-pin",
+     "replaces": "RPC set_comment_pin",
+     "checks": "Caller owns the video; unpins others on that video; sets target pin state."
+    },
+    {
+     "action": "moderate-video",
+     "replaces": "adminDecide + guard trigger",
+     "checks": "POST-moderation only (2026-11-03): acts on live/reported videos after publication. rejected hides/removes (file goes private), needs_review flags, approved restores. Team admins admin/moderator. Sets status/reason/published_at, inserts moderation_reviews + moderation_events rows, flips video+thumbnail file permissions, inserts moderation notification. Never gates new posts."
+    },
+    {
+     "action": "moderate-story",
+     "replaces": "adminDecideStory",
+     "checks": "Team admins admin/moderator. Sets story status + flips story file permissions."
+    },
+    {
+     "action": "moderate-comment",
+     "replaces": "Comment hide/remove RLS update",
+     "checks": "Team admins admin/moderator. Sets comment status + flips document permissions."
+    },
+    {
+     "action": "decide-verification",
+     "replaces": "adminDecideVerification",
+     "checks": "Team admins admin/moderator. Sets request status/decided_at/decided_by; on approval sets profiles.verified AND public_profiles.verified in same call; inserts system notification."
+    },
+    {
+     "action": "decide-report",
+     "replaces": "adminSetReportStatus",
+     "checks": "Team admins admin/moderator. Sets report status only."
+    },
+    {
+     "action": "suspend-user",
+     "replaces": "adminSetSuspended (suspend)",
+     "checks": "Team admin ONLY. Sets is_suspended, deletes public_profiles synchronously, flips creator files to owner+team read."
+    },
+    {
+     "action": "unsuspend-user",
+     "replaces": "adminSetSuspended (restore)",
+     "checks": "Team admin ONLY. Clears is_suspended, recreates public_profiles, flips approved+public files back to any read."
+    },
+    {
+     "action": "set-role",
+     "replaces": "SQL role update (owner setup)",
+     "checks": "Team admin ONLY. Verifies team membership matches requested role before writing profiles.role mirror."
+    },
+    {
+     "action": "delete-video",
+     "replaces": "deleteDraft + creator delete",
+     "checks": "Owner or team admin/moderator. Deletes video + child rows (video_categories, video_likes, saved_videos, comments + comment_likes, poll_votes) + video/thumbnail files. Explicit cascade; no FK cascade exists."
+    },
+    {
+     "action": "notify",
+     "replaces": "Fallback for client notification inserts (G2)",
+     "checks": "Signed-in caller. Creates notifications document addressed to another user. Wired only if cross-user grant test fails."
+    },
+    {
+     "action": "file-report",
+     "replaces": "Fallback for client report inserts",
+     "checks": "Signed-in caller. Creates reports document. Wired only if grant test fails."
+    },
+    {
+     "action": "check-allow-prefs",
+     "replaces": "Cross-user getAllowPrefs reads",
+     "checks": "Signed-in caller. Reads another user's user_preferences via API key; returns only the five allow/view fields or defaults."
+    }
+   ],
+   "combinationJustification": "One combined HTTP function for all synchronous user actions sharing auth/team checks, vs 3 separate RPC functions + profile creation + moderation endpoints which would exceed the 5-function Free budget. Cost: single failure domain, larger bundle."
+  },
+  {
+   "id": "events",
+   "name": "events",
+   "runtime": "node-22",
+   "entrypoint": "src/main.js",
+   "trigger": "Database events (use Console Events picker; do not hand-type event strings - format changed with TablesDB rename)",
+   "executePermission": [],
+   "timeoutSeconds": 15,
+   "envVars": [
+    "APPWRITE_ENDPOINT",
+    "APPWRITE_PROJECT_ID",
+    "APPWRITE_API_KEY"
+   ],
+   "eventTriggersLogical": [
+    {
+     "collections": [
+      "video_likes"
+     ],
+     "operations": [
+      "create",
+      "delete"
+     ],
+     "logic": "sync-counters: count video_likes rows for video_id; write exact count to videos.like_count. Idempotent recount, never delta."
+    },
+    {
+     "collections": [
+      "comments"
+     ],
+     "operations": [
+      "create",
+      "delete"
+     ],
+     "logic": "sync-counters: count ALL comments rows for video_id (any status, mirroring SQL trigger); write to videos.comment_count. Client count updates are NOT source of truth."
+    },
+    {
+     "collections": [
+      "profiles"
+     ],
+     "operations": [
+      "create"
+     ],
+     "logic": "profile-sync: create public_profiles document (safe fields only) unless suspended."
+    },
+    {
+     "collections": [
+      "profiles"
+     ],
+     "operations": [
+      "update"
+     ],
+     "logic": "profile-sync: suspended -> delete public_profiles; not suspended -> upsert safe fields only (username, display_name, bio, avatar_url, website, private_account). Never copies verified/role/is_suspended."
+    },
+    {
+     "collections": [
+      "profiles"
+     ],
+     "operations": [
+      "delete"
+     ],
+     "logic": "profile-sync: delete public_profiles document."
+    }
+   ],
+   "notes": [
+    "Handlers must be idempotent (at-least-once delivery). No moderation audit or file flips here; api actions do those synchronously."
+   ]
+  },
+  {
+   "id": "create-upload",
+   "name": "create-upload",
+   "runtime": "node-22",
+   "entrypoint": "src/main.js",
+   "trigger": "HTTP execution",
+   "executePermission": [
+    "execute(\"users\")"
+   ],
+   "timeoutSeconds": 30,
+   "envVars": [
+    "APPWRITE_ENDPOINT",
+    "APPWRITE_PROJECT_ID",
+    "APPWRITE_API_KEY"
+   ],
+   "contract": {
+    "flow": "Client uploads file bytes FIRST to media bucket (owner-only file permissions), then calls this function with file $id (+ thumbnail file $id). Function authenticates caller, rejects suspended callers, validates duration/size/caption/location/visibility/filter/poll/duet/reply, verifies file exists/size via API key (deletes file on validation failure), creates videos document LIVE (moderation_status approved + published_at set, or draft if is_draft) with the live file-permission template (public read for approved+public), creates NO video_categories rows (category_ids removed from the contract 2026-11-03; any category_ids/sound/music field sent is ignored), logs moderation_events uploaded row, handles @mentions best-effort (skipped for drafts), returns created video document. No upload_url: Appwrite has no signed-upload-URL equivalent. Post-moderation happens afterwards via api moderate-video; nothing here gates publication.",
+    "validation": {
+     "duration_seconds": "> 0 and <= 20.5 (probe values re-checked here; determined client can lie about probe - same limitation as Supabase, strict server probing is a future upgrade)",
+     "size_bytes": "<= 26214400",
+     "caption": "<= 300 chars",
+     "visibility": "public|followers|private",
+     "filter": "normal|warm|cool|mono|vivid",
+     "poll": "question <=80, two options <=30 each, all-or-none",
+     "duet_of": "must exist",
+     "reply_comment_id": "must exist; reply_video_id derived from comment",
+     "moderation_status": "approved for non-draft posts (direct publish, exact feed-query value), or draft only when is_draft=true. pending is never assigned to new uploads (legacy enum value only).",
+     "location": "optional string, trimmed, max 256 chars, null when absent/empty",
+     "post_screen_extras": "trim_start_seconds / trim_end_seconds: numbers clamped to [0, duration_seconds] (defaults 0 / duration_seconds); content_disclosure: boolean, true only when exactly true is sent; link_url: optional string, trimmed, max 300 chars, null when absent/empty. All stored on the video row by create-upload (2026-11-03 fix-up; shapes match the demo store).",
+     "category_ids": "REMOVED from the contract (2026-11-03). Sent values are ignored; no validation, no storage, no video_categories rows.",
+     "sound": "sound_id (string, max 64, opaque, not FK-validated), sound_title (max 80), sound_category (one of sound-effects/naat/taqreer/islamic, else null). Stored on the video row by create-upload. No music field of any kind is accepted or stored; any other sound/music/audio field sent is ignored. Catalog rows live in the sounds collection (see soundsLibrary)."
+    }
+   },
+   "notes": [
+    "The ONLY video-creation path. No client collection create permission on videos."
+   ]
+  },
+  {
+   "id": "delete-account",
+   "name": "delete-account",
+   "runtime": "node-22",
+   "entrypoint": "src/main.js",
+   "trigger": "HTTP execution",
+   "executePermission": [
+    "execute(\"users\")"
+   ],
+   "timeoutSeconds": 30,
+   "envVars": [
+    "APPWRITE_ENDPOINT",
+    "APPWRITE_PROJECT_ID",
+    "APPWRITE_API_KEY"
+   ],
+   "contract": {
+    "flow": "Authenticate caller (caller deletes only own account). Delete user files (videos/stories/thumbnail files in media). Delete user documents across all referencing collections (explicit cascade; no FK cascade exists). Null reviewer_id/admin_id/video_id on SET NULL rows (moderation_reviews, admin_actions, moderation_events) instead of deleting history rows. Remove from Team admins if member. Delete Auth user via Users API last. Return {ok:true}. Partial failure reported as error; idempotent (already-deleted = success).",
+    "collectionsDeleted": [
+     "profiles",
+     "public_profiles",
+     "user_preferences",
+     "videos",
+     "video_categories",
+     "video_likes",
+     "saved_videos",
+     "comments",
+     "comment_likes",
+     "poll_votes",
+     "watch_history",
+     "notifications",
+     "reports",
+     "verification_requests",
+     "messages",
+     "follows",
+     "blocked_users",
+     "story_views",
+     "stories",
+     "account_events"
+    ],
+    "collectionsNulledNotDeleted": [
+     "moderation_reviews (reviewer_id)",
+     "moderation_events (video_id)",
+     "admin_actions (admin_id)"
+    ]
+   },
+   "notes": [
+    "Play Store account-deletion requirement. Deleting Auth user does NOT delete profile/content documents automatically."
+   ]
+  }
+ ],
+ "soundsLibrary": {
+  "decision": "2026-11-03 (owner order). Catalog-driven sounds library; structured metadata storage in a NEW sounds collection because the client implementation strictly requires it (see collectionAdded). Functions write sounds rows since 2026-11-03 (api create-sound for user/staff-added sounds; create-upload auto-registers original sounds). R7 superseded: user-added sounds are intentional, direct-to-library.",
+  "catalog": "Built-in catalog is an empty client-side array (SOUNDS_CATALOG, deliberately empty: no naat/taqreer audio exists in the workspace), plus an optional catalog file at the fixed path sounds-catalog.json (app root; JSON array of {id, title, category, duration_seconds, src, source}; ships empty; loaded by loadSoundsCatalog in store.js, silent fallback to the empty inline catalog on absence/failure/malformed content). Owner-added sounds are rows in the sounds collection: id ($id), title, category, duration_seconds, storage_path (src), source (license note). listSounds returns the built-in catalog + catalog-file entries concatenated with sounds rows, deduped by id. Tabs: Sound Effects, Naat, Taqreer, Islamic (other Islamic audio). Original audio stays the default. NO music anywhere. Sounds are streaming-only: playback in the library/admin preview only, never exposed as downloads in the UI.",
+  "storage": "Admin-added sounds are audio files uploaded to the existing media bucket (audio extensions added: mp3, m4a, wav, ogg; 25 MiB bucket ceiling applies). The catalog src references the bucket file. Sound files carry read(any) so any viewer can play a selected sound; the admin sets file permissions at upload (no function flips sound files). Server endpoints for catalog writes exist since 2026-11-03 (api create-sound / report-sound / remove-sound; create-upload original-sound auto-register). Live add = upload the audio file to the media bucket (read any) + api create-sound (or a direct sounds-row create from the client, which remains possible); demo-mode admin additions persist locally, client-side (localStorage data URLs, client-side 8 MB cap).",
+  "contentConstraint": "HONEST EMPTY STATES. No naat/taqreer audio exists in the workspace and no copyrighted audio may be bundled or invented. Naat/Taqreer tabs stay empty until the owner adds audio he owns or has rights to. The Sound Effects tab may be seeded ONLY with verified CC0/public-domain effects, license noted in the sounds row's source field; as of this change no such seed is verified or recorded here — if the client worker seeds any, the license note must be recorded in the row itself.",
+  "enforcement": "Selecting a sound does not change video enforcement: the 20.5s / 25 MiB limits apply to the uploaded video file in create-upload. Catalog sound duration is display metadata only. Per-video sound selection IS persisted: create-upload stores sound_id / sound_title / sound_category on the video row (opaque, not FK-validated). Post-screen extras ARE persisted since the 2026-11-03 fix-up: create-upload stores trim_start_seconds / trim_end_seconds (doubles, clamped to the video length), content_disclosure (boolean) and link_url (string, max 300) on the video row, matching the demo store shapes.",
+  "collectionAdded": true,
+  "collection": "sounds (see collections entry; 10 attributes, 2 indexes). Added because the client implementation strictly requires structured metadata storage for owner-added sounds — the contingency named in the 2026-11-03 sounds decision."
+ },
+ "seed": {
+  "collection": "categories",
+  "documentIdRule": "Document $id = slug; is_active=true for all.",
+  "categories": [
+   {
+    "name": "Islamic Knowledge",
+    "slug": "islamic-knowledge",
+    "sort_order": 1
+   },
+   {
+    "name": "Quran and Recitation",
+    "slug": "quran-recitation",
+    "sort_order": 2
+   },
+   {
+    "name": "Hadith and Sunnah",
+    "slug": "hadith-sunnah",
+    "sort_order": 3
+   },
+   {
+    "name": "Duas and Daily Reminders",
+    "slug": "duas-reminders",
+    "sort_order": 4
+   },
+   {
+    "name": "Islamic History and Seerah",
+    "slug": "islamic-history-seerah",
+    "sort_order": 5
+   },
+   {
+    "name": "Islamic Motivation",
+    "slug": "islamic-motivation",
+    "sort_order": 6
+   },
+   {
+    "name": "Halal Funny Videos",
+    "slug": "halal-funny",
+    "sort_order": 7
+   },
+   {
+    "name": "Clean Comedy",
+    "slug": "clean-comedy",
+    "sort_order": 8
+   },
+   {
+    "name": "Educational Videos",
+    "slug": "educational",
+    "sort_order": 9
+   },
+   {
+    "name": "Science and General Knowledge",
+    "slug": "science-gk",
+    "sort_order": 10
+   },
+   {
+    "name": "Life Lessons and Sabaq",
+    "slug": "life-lessons",
+    "sort_order": 11
+   },
+   {
+    "name": "Motivational Stories",
+    "slug": "motivational-stories",
+    "sort_order": 12
+   },
+   {
+    "name": "Personal Development",
+    "slug": "personal-development",
+    "sort_order": 13
+   },
+   {
+    "name": "Good Manners and Character",
+    "slug": "manners-character",
+    "sort_order": 14
+   },
+   {
+    "name": "Family and Society",
+    "slug": "family-society",
+    "sort_order": 15
+   },
+   {
+    "name": "Positive Entertainment",
+    "slug": "positive-entertainment",
+    "sort_order": 16
+   },
+   {
+    "name": "Language Learning",
+    "slug": "language-learning",
+    "sort_order": 17
+   },
+   {
+    "name": "Technology and Digital Skills",
+    "slug": "technology-skills",
+    "sort_order": 18
+   },
+   {
+    "name": "Halal Business and Entrepreneurship",
+    "slug": "halal-business",
+    "sort_order": 19
+   },
+   {
+    "name": "Health and Positive Lifestyle",
+    "slug": "health-lifestyle",
+    "sort_order": 20
+   }
+  ],
+  "keyHandling": "Seed via Console (no key) or via a separate short-lived API key created by the owner, used on the owner's own machine, then deleted. The key is never shared in chat, never stored in files, never reused as the functions key."
+ },
+ "enforcementMap": [
+  {
+   "supabase": "RLS policies (0002)",
+   "appwrite": "Collection permissions + document-permission templates + Team admins",
+   "enforcedBy": "Appwrite permissions engine"
+  },
+  {
+   "supabase": "guard_profile_role trigger",
+   "appwrite": "profiles.role/is_suspended/verified never trusted; team is authority; sync never copies them",
+   "enforcedBy": "Functions + design (residual R1)"
+  },
+  {
+   "supabase": "guard_video_moderation trigger",
+   "appwrite": "Moderation only via api action + file-permission flip backstop",
+   "enforcedBy": "Function + file permissions (residual R2)"
+  },
+  {
+   "supabase": "touch_updated_at triggers",
+   "appwrite": "$updatedAt automatic",
+   "enforcedBy": "Appwrite"
+  },
+  {
+   "supabase": "bump_like_count / bump_comment_count triggers",
+   "appwrite": "events function recounts",
+   "enforcedBy": "Function (event trigger)"
+  },
+  {
+   "supabase": "RPC increment_video_view",
+   "appwrite": "api action increment-view",
+   "enforcedBy": "Function"
+  },
+  {
+   "supabase": "RPC publish_draft",
+   "appwrite": "api action publish-draft",
+   "enforcedBy": "Function"
+  },
+  {
+   "supabase": "RPC set_comment_pin",
+   "appwrite": "api action set-comment-pin",
+   "enforcedBy": "Function"
+  },
+  {
+   "supabase": "CHECK duration_seconds",
+   "appwrite": "Float bounds 0-20.5 + create-upload validation",
+   "enforcedBy": "Schema + Function"
+  },
+  {
+   "supabase": "CHECK size_bytes <= 26214400",
+   "appwrite": "Integer max + bucket max file size + create-upload",
+   "enforcedBy": "Schema + bucket + Function"
+  },
+  {
+   "supabase": "CHECK caption <= 300",
+   "appwrite": "String size 300 + function slice",
+   "enforcedBy": "Schema + Function"
+  },
+  {
+   "supabase": "CHECK filter/visibility/moderation_status enums",
+   "appwrite": "Enum attributes; non-pending statuses function-only",
+   "enforcedBy": "Schema + Function"
+  },
+  {
+   "supabase": "CHECK body/reason/message lengths",
+   "appwrite": "String sizes (maxima) + client validation (minima)",
+   "enforcedBy": "Schema (max) + client (min)"
+  },
+  {
+   "supabase": "CHECK username regex",
+   "appwrite": "create-profile validation + client validation; unique index",
+   "enforcedBy": "Function + client"
+  },
+  {
+   "supabase": "CHECK self-follow/self-block/self-message",
+   "appwrite": "Client validation only; no server enforcement",
+   "enforcedBy": "Client"
+  },
+  {
+   "supabase": "CHECK choice in (0,1)",
+   "appwrite": "Integer min 0 max 1",
+   "enforcedBy": "Schema"
+  },
+  {
+   "supabase": "CHECK poll JSONB shape",
+   "appwrite": "Decomposed attributes + create-upload all-or-none validation",
+   "enforcedBy": "Function + schema"
+  },
+  {
+   "supabase": "(new, 2026-11-03) post-screen extras trim_*/content_disclosure/link_url",
+   "appwrite": "trim_* double attributes (0-20.5) + create-upload clamping; content_disclosure boolean attribute + create-upload exact-true storage; link_url string size 300 + create-upload trim/slice; null when absent",
+   "enforcedBy": "Schema + Function"
+  },
+  {
+   "supabase": "Composite PKs (9 tables)",
+   "appwrite": "Unique indexes + auto IDs; 409 = already exists",
+   "enforcedBy": "Schema (index)"
+  },
+  {
+   "supabase": "FK ON DELETE CASCADE",
+   "appwrite": "Explicit deletes in delete-video / delete-account",
+   "enforcedBy": "Functions"
+  },
+  {
+   "supabase": "FK ON DELETE SET NULL",
+   "appwrite": "Explicit nulling in delete-account",
+   "enforcedBy": "Function"
+  },
+  {
+   "supabase": "Views public_videos / public_profiles",
+   "appwrite": "Client query patterns + synced public_profiles collection",
+   "enforcedBy": "Client + sync function"
+  },
+  {
+   "supabase": "Storage policies (approved-only reads)",
+   "appwrite": "Per-file permission templates + flips",
+   "enforcedBy": "Function-set file permissions"
+  },
+  {
+   "supabase": "create-upload signed URL",
+   "appwrite": "Inverted flow: client uploads first, function validates + creates row",
+   "enforcedBy": "Function + bucket permissions"
+  },
+  {
+   "supabase": "delete-account edge function",
+   "appwrite": "delete-account function with explicit cascade",
+   "enforcedBy": "Function"
+  },
+  {
+   "supabase": "is_admin() / is_moderator() helpers",
+   "appwrite": "Team admins membership, roles admin/moderator",
+   "enforcedBy": "Teams API in functions; team:admins in permissions"
+  }
+ ],
+ "judgmentCalls": [
+  {
+   "id": "J1",
+   "decision": "Team admins is the ONLY authority for admin/moderator power; profiles.role is a display mirror.",
+   "alternatives": "profiles.role alone (rejected: self-grantable via direct doc update, no per-attribute permissions); user labels (rejected: flat, cannot distinguish admin vs moderator in one check)."
+  },
+  {
+   "id": "J2",
+   "decision": "No relationship attributes; plain string IDs + function existence checks.",
+   "alternatives": "Appwrite relationship attributes (rejected: auto reverse attributes + cascade options do not match SQL FKs)."
+  },
+  {
+   "id": "J3",
+   "decision": "Profile creation ONLY via api create-profile function.",
+   "alternatives": "Client create with collection permission (rejected: permissions cannot inspect attribute values, so role=user cannot be enforced)."
+  },
+  {
+   "id": "J4",
+   "decision": "Category slugs are join keys; numeric ids 1-20 dropped; category $id = slug.",
+   "alternatives": "Document IDs '1'..'20' (rejected: opaque, unqueryable by name)."
+  },
+  {
+   "id": "J5",
+   "decision": "Poll JSONB decomposed into poll_question/poll_option_a/poll_option_b.",
+   "alternatives": "Single JSON string attribute (rejected: no JSON type; independent length caps; client reads plain fields)."
+  },
+  {
+   "id": "J6",
+   "decision": "Separate synced public_profiles collection.",
+   "alternatives": "Document permissions on profiles hiding role (rejected: permissions are per-document, not per-attribute; role would leak)."
+  },
+  {
+   "id": "J7",
+   "decision": "Two buckets (media + avatars); no folders; name-convention prefixes; file-permission enforcement.",
+   "alternatives": "Three buckets splitting videos/thumbnails/stories (rejected: exceeds need; Free allows 3 but consolidation is cleaner and leaves a spare slot)."
+  },
+  {
+   "id": "J8",
+   "decision": "Four functions: api router + events + create-upload + delete-account; one spare slot.",
+   "alternatives": "Seven separate functions (impossible: 5-function Free budget)."
+  },
+  {
+   "id": "J9",
+   "decision": "create-upload flow inverted: client uploads first, function validates second.",
+   "alternatives": "Signed-upload-URL flow (no Appwrite equivalent)."
+  },
+  {
+   "id": "J10",
+   "decision": "user_preferences kept owner-only; cross-user gate reads move into api check-allow-prefs.",
+   "alternatives": "Public read on preferences (rejected: private settings)."
+  },
+  {
+   "id": "J11",
+   "decision": "Direct publish (2026-11-03, owner order): no pre-publication review for videos. create-upload writes moderation_status approved + published_at + live file permissions; publish-draft flips drafts to approved. Moderation is post-publication only (report + warning/strike, admin remove/hide via moderate-video rejected, suspend). Stories keep pre-publication review.",
+   "alternatives": "Keeping the pending queue (rejected: owner order, review khatam). Inventing a new live status string (rejected: feed already queries approved)."
+  },
+  {
+   "id": "J12",
+   "decision": "videos.location added (optional string, max 256): free-text place name from the post screen, reusing existing visibility/comment/duet fields; no field duplicated.",
+   "alternatives": "Structured location object / separate collection (rejected: free text only, no extra storage needed)."
+  },
+  {
+   "id": "J13",
+   "decision": "Sounds library (2026-11-03, owner order) is catalog-driven: an empty built-in client catalog plus a NEW sounds collection for owner-added sounds, because the client implementation strictly requires structured metadata storage (live store reads/writes the sounds collection directly; see collections entry). Admin-added audio files live in the existing media bucket; demo-mode additions persist locally, client-side. Per-video sound choice is stored on the video row (sound_id/sound_title/sound_category). No function endpoint writes the catalog. No music anywhere; Naat/Taqreer tabs ship with honest empty states until the owner adds audio he owns or has rights to.",
+   "alternatives": "Catalog data file only with no collection (rejected: the client implementation requires structured rows for admin-added sounds). Bundling/inventing naat/taqreer audio (rejected: none exists in the workspace; no copyrighted audio may be bundled)."
+  },
+  {
+   "id": "J14",
+   "decision": "User-added sounds, direct-to-library (2026-11-03 ~23:35, owner order, SUPERSEDES R7): any signed-in user may add a sound via api create-sound with no admin approval; source_type records admin vs user; violations are removed after the fact via report-sound + staff remove-sound (status flip to removed, row/file kept). Original sounds auto-register from create-upload (category original, source_type original, video_id dedupe, never failing the upload). Category original is function-only and never offered in add-sound forms.",
+   "alternatives": "Keeping admin-only creation UI-gated (rejected: superseded owner decision). Restricting sounds creation by collection permission (rejected: would block the intentional user-added flow). Deleting removed sounds rows/files (rejected: audit trail + stable references)."
+  }
+ ],
+ "schemaGapsFixed": [
+  {
+   "id": "G1",
+   "finding": "profiles has NO verified column in any migration, yet 0003 public_videos selects p.verified and the app reads/writes profiles.verified. Shipped Supabase schema is inconsistent.",
+   "fix": "Added verified boolean (default false) to profiles and public_profiles."
+  },
+  {
+   "id": "G2",
+   "finding": "Migration 0002 defines NO user insert policy for notifications, but the live store inserts notifications client-side (share/mentions/verification).",
+   "fix": "Follows app behaviour: create(users) granted with cross-user grant caveat + api notify fallback. Flagged explicitly."
+  },
+  {
+   "id": "G3",
+   "finding": "SQL public_profiles view omits verified/private_account which the app reads from public-profile rows.",
+   "fix": "Both included in Appwrite public_profiles; verified synced only by decide-verification."
+  },
+  {
+   "id": "G4",
+   "finding": "Followers-visibility videos are unreadable via direct query in SQL live mode (videos_select exposes only approved+public). Demo store diverges.",
+   "fix": "Mirrored SQL faithfully; no follower-read permission invented. New feature decision if owner wants change."
+  },
+  {
+   "id": "G5",
+   "finding": "Brief counts 21 then 22 tables; migrations define 23.",
+   "fix": "All 23 mapped + public_profiles = 24 collections; sounds collection added 2026-11-03 makes 25 total."
+  }
+ ],
+ "residualRisks": [
+  {
+   "id": "R1",
+   "risk": "Owner can tamper with own profiles role/verified/is_suspended via direct API call (no per-attribute permissions).",
+   "containment": "Nothing trusts those fields; sync ignores them; file flips backstop suspension/verification. Full-profile reads limited to owner + team."
+  },
+  {
+   "id": "R2",
+   "risk": "Creator can flip own video moderation_status via direct API call.",
+   "containment": "File-permission backstop: self-approved video is listed but unplayable; no moderation_reviews row exists. Follow-up option: remove client update on videos, route edits via api."
+  },
+  {
+   "id": "R3",
+   "risk": "Story 24h expiry is query-only; expired approved stories readable by direct document ID.",
+   "containment": "Feed filtering correct. Future 5th scheduled function could close it."
+  },
+  {
+   "id": "R4",
+   "risk": "Moderators technically hold team:admins collection permissions where intent is admin-only or moderator-only.",
+   "containment": "Role separation enforced by functions; direct-API abuse by a rogue moderator out of scope (trusted humans)."
+  },
+  {
+   "id": "R5",
+   "risk": "Cross-user document-permission grants (notifications/reports/messages) may be rejected by Appwrite.",
+   "containment": "Must verify in first live run; api notify/file-report fallbacks specified."
+  },
+  {
+   "id": "R6",
+   "risk": "public_profiles and counters are eventually consistent (seconds of staleness via events function).",
+   "containment": "UI must tolerate staleness; never write counters/public fields from client to fix it."
+  },
+  {
+   "id": "R7",
+   "risk": "SUPERSEDED 2026-11-03 ~23:35 (owner decision): any signed-in user can create a sounds row directly, and that is now INTENTIONAL - user-added sounds go direct-to-library with no admin approval (api create-sound; source_type user/admin). The former risk (admin-only creation UI-gated only) no longer applies and must not be re-imposed.",
+   "containment": "Violating sounds are removed after the fact via report-sound + staff remove-sound (status removed, row/file kept). Team-only update/delete permissions still stop non-team users changing/removing rows directly."
+  }
+ ],
+ "scope": {
+  "demoMode": "Unaffected. Demo runs on localStorage, no backend. This spec covers live mode only.",
+  "noClientCode": "This file contains no client code. Client changes required are described in APPWRITE_SETUP.md for implementation workers.",
+  "noDeployment": "Nothing in this spec deploys or creates anything in Appwrite. All creation is by hand in Console following APPWRITE_SETUP.md."
+ }
+}

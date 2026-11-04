@@ -1,6 +1,7 @@
 /* Tokisla design system — dark-first, owner logo gradient (cyan -> violet -> pink) on near-black (docs/BRAND.md) */
 :root{
   --emerald:#7C3AED; --emerald-dark:#5B21B6; --emerald-soft:#F0EAFB;
+  --ok:#16A34A;
   --gold:#EC4899; --ink:#12101A; --muted:#6E6A78; --line:#E6E3EE;
   --bg:#F8F7FA; --card:#FFFFFF; --error:#D64545; --radius:16px;
   --nav-h:60px;
@@ -45,6 +46,10 @@ h1{font-size:26px;margin:8px 0} h2{font-size:22px;margin:6px 0} h3{font-size:16p
 .tab{flex:1;height:40px;border-radius:9px;font-weight:600;color:var(--emerald-dark)}
 .tab.active{background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.08)}
 .field{margin-bottom:14px}
+.input-wrap{position:relative}
+.input-wrap input{padding-right:42px}
+.valid-tick{position:absolute;right:10px;top:50%;transform:translateY(-50%);width:22px;height:22px;color:var(--ok);display:flex;align-items:center;justify-content:center;pointer-events:none}
+.valid-tick .ui-icon{width:20px;height:20px;stroke-width:2.6}
 .hint{font-size:12px}
 .form-error{background:#fdecec;color:#8f1d1d;border:1px solid #f5c6c6;padding:10px 12px;border-radius:10px;font-size:13px;margin-bottom:12px}
 
@@ -249,6 +254,7 @@ body{background:#07070C}
 .studio-label{font-size:12.5px;color:var(--muted)}
 .rank-badge{width:26px;height:26px;border-radius:50%;background:var(--gold);color:#20180a;font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center;flex:none}
 /* Dark display */
+[data-theme="dark"]{--ok:#34D399}
 [data-theme="dark"] .view{background:#0A0A10;color:#F1F0F6}
 [data-theme="dark"] .sheet{background:#12121A;color:#F1F0F6}
 [data-theme="dark"] .card,[data-theme="dark"] .list-item,[data-theme="dark"] .studio-card{background:#15151E;border-color:#282833;color:#F1F0F6}
@@ -324,6 +330,65 @@ body{background:#07070C}
 
 /* Perfect circles: har gol icon/avatar hamesha barabar (1:1) rahe, oval na bane */
 .avatar-fallback,.rail .avatar,.rail-btn .bubble,.icon-btn,.share-ico,.empty-icon,.auth-close,.profile-gear,.video-grid .lock-badge,.rail-follow,.avatar-plus,.thread-avatar,.comment .avatar-fallback,.list-item .avatar-fallback,.share-friend .avatar-fallback{aspect-ratio:1/1;flex:none}
+
+/* ---- TikTok-style create flow: camera -> edit -> post (Tokisla theme) ---- */
+.create-screen{padding-bottom:16px}
+.cam-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:4px 0 12px}
+.cam-head h2{margin:0}
+.cam-icon-btn{background:var(--card);color:var(--ink);border:1px solid var(--line)}
+.cam-stage{position:relative;background:#000;border-radius:16px;overflow:hidden;aspect-ratio:9/16;max-height:430px;margin:0 auto;width:100%}
+.cam-stage video{width:100%;height:100%;object-fit:cover}
+.cam-unavailable{position:absolute;inset:auto 0 0 0;padding:12px;background:rgba(0,0,0,.72);color:#fff;font-size:13px;line-height:1.5}
+.cam-filters{justify-content:center;margin:12px 0 6px}
+.cam-timer-row{display:flex;align-items:center;gap:10px;font-size:12.5px;color:var(--muted);margin:6px 0}
+.cam-progress{flex:1;height:6px;border-radius:99px;background:var(--emerald-soft);overflow:hidden}
+.cam-progress i{display:block;height:100%;width:0%;background:linear-gradient(90deg,#22D3EE,#8B5CF6,#EC4899)}
+.cam-controls{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:10px 0}
+.cam-record{width:68px;height:68px;border-radius:50%;border:4px solid var(--emerald);background:#fff;display:flex;align-items:center;justify-content:center;flex:none;cursor:pointer}
+.cam-record-dot{width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#8B5CF6,#EC4899)}
+.cam-record.recording .cam-record-dot{border-radius:12px;background:var(--error);animation:recpulse 1s infinite}
+@keyframes recpulse{50%{opacity:.55}}
+.edit-top{display:flex;justify-content:center;align-items:center;gap:8px;margin:4px 0 12px}
+.edit-sound-btn{flex:1;min-width:0;overflow:hidden}
+.edit-sound-btn #editSoundLabel{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.edit-sound-clear{flex:none;width:44px;height:44px;background:var(--card);color:var(--ink);border:1px solid var(--line)}
+.edit-stage{position:relative;background:#000;border-radius:16px;overflow:hidden;aspect-ratio:9/16;max-height:430px;margin:0 auto;width:100%}
+.edit-preview{width:100%;height:100%;object-fit:cover}
+.edit-text-overlay{position:absolute;left:10%;right:10%;top:20%;text-align:center;color:#fff;font-weight:800;font-size:20px;text-shadow:0 2px 8px rgba(0,0,0,.7);pointer-events:none;overflow-wrap:anywhere}
+.edit-rail{position:absolute;right:8px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:10px;z-index:3}
+.edit-tool{width:52px;height:52px;border-radius:50%;background:rgba(20,24,22,.55);color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(2px);cursor:pointer;border:1px solid rgba(255,255,255,.25)}
+.edit-tool.active{background:linear-gradient(135deg,#8B5CF6,#EC4899);border-color:transparent}
+.edit-panel{margin-top:12px}
+.edit-panel input[type="range"]{padding:0}
+.post-top{display:flex;gap:12px;align-items:flex-start;margin-top:4px}
+.post-desc{flex:1;min-width:0}
+.post-desc label{font-size:15px}
+.post-desc textarea{border:none;padding:4px 2px;min-height:96px}
+.post-tag-row{display:flex;gap:8px;margin-top:4px}
+.post-tag-btn{font-weight:700;font-size:14px;color:var(--emerald-dark);padding:6px 2px;cursor:pointer}
+.post-thumb-col{flex:none;width:78px;text-align:center}
+.post-thumb{width:78px;height:104px;border-radius:10px;object-fit:cover;background:#000;display:block}
+.post-cover-btn{margin:2px 0 0;padding:4px 0;font-size:13px}
+.post-row{display:flex;align-items:center;gap:10px;width:100%;padding:14px 2px;font-size:15px;font-weight:550;text-align:left;border-bottom:1px solid var(--line);cursor:pointer;color:inherit}
+.post-row-label{flex:1}
+.post-actions{position:sticky;bottom:0;display:flex;gap:10px;padding:12px 0 calc(env(safe-area-inset-bottom,0px) + 4px);background:linear-gradient(180deg,transparent,var(--bg) 32%)}
+.post-actions .btn-primary{flex:1}
+.post-countdown{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:90;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:#fff}
+.count-ring{width:84px;height:84px;transform:rotate(-90deg)}
+.count-ring circle{fill:none;stroke-width:6}
+.count-ring-bg{stroke:rgba(255,255,255,.25)}
+.count-ring-fg{stroke:#8B5CF6;stroke-linecap:round;stroke-dasharray:213.6;stroke-dashoffset:213.6}
+.count-label{font-weight:700;font-size:15px}
+.loc-line,.sound-line{font-size:12.5px;color:rgba(255,255,255,.85);margin-top:3px;display:flex;align-items:center;gap:5px;text-shadow:0 1px 5px rgba(0,0,0,.55)}
+.loc-line .ui-icon,.sound-line .ui-icon{width:14px;height:14px}
+.sound-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
+.sound-tab{padding:8px 13px;border-radius:999px;border:1.5px solid var(--line);font-weight:600;font-size:13px;cursor:pointer;color:inherit;background:var(--card)}
+.sound-tab.active{background:linear-gradient(92deg,#7C3AED,#DB2777);border-color:transparent;color:#fff}
+.sound-row{display:flex;align-items:center;gap:10px;padding:10px 2px;border-bottom:1px solid var(--line)}
+.sound-row .grow{flex:1;min-width:0}
+.sound-row .t{font-weight:600;font-size:14px}
+.sound-row .s{font-size:12px;color:var(--muted)}
+.sound-empty{padding:18px 4px;text-align:center;color:var(--muted);font-size:13.5px;line-height:1.6}
 
 /* ---- feature batch 0003: hashtags, polls, duets, replies, stories, filters ---- */
 .tag-link{color:#38BDF8;font-weight:600;cursor:pointer}

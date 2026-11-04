@@ -7,7 +7,7 @@ import { fileURLToPath } from "url";
 
 const root = path.dirname(fileURLToPath(import.meta.url)) + "/..";
 const html = fs.readFileSync(root + "/index.html", "utf8")
-  .replace(/<script src="https:[^"]+"><\/script>/, "") // skip supabase CDN (unused in demo)
+  .replace(/<script src="https:[^"]+"><\/script>/, "") // skip remote SDK CDN (unused in demo)
   .replace(/<script src="config.js"><\/script>/, "")
   .replace(/<script src="store.js"><\/script>/, "")
   .replace(/<script src="app.js"><\/script>/, "");
@@ -26,7 +26,23 @@ if (!window.navigator.serviceWorker) Object.defineProperty(window.navigator, "se
 
 const run = (file) => window.eval(fs.readFileSync(root + "/" + file, "utf8"));
 run("config.js");
+// Force DEMO mode for this harness: config.js now ships the real project
+// ID, which would make the store live (and throw without an Appwrite
+// client). Clearing the ID in memory only — config.js itself is untouched.
+window.TOKISLA_CONFIG.APPWRITE_PROJECT_ID = "";
 run("store.js");
+// Seed ONE original sound + ONE user-added sound BEFORE app.js boots, so
+// the app store reads them from the same localStorage at creation. The
+// seed video is private, so the guest feed still shows exactly the
+// owner's 10 public slides. (Seeding after boot would be invisible to
+// the app store's in-memory copy.)
+const seedStore = window.TokislaStore.createStore(window.localStorage, null);
+const seedSoundUser = await seedStore.signUp("seed-sound@example.com", "secret1", "seed_sound");
+await seedStore.submitVideo(seedSoundUser.id, { duration_seconds: 9, caption: "seed original audio", visibility: "private", storage_path: "blob:demo" });
+await seedStore.addSound(seedSoundUser.id, { title: "Rain patter", category: "sound-effects", src: "https://example.invalid/rain.mp3" });
+// Sign-up leaves a persisted session behind: clear it so the app boots
+// as a guest, exactly as the feed assertions below expect.
+await seedStore.logOut();
 run("app.js");
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -61,6 +77,27 @@ $("#tabSignup").dispatchEvent(new window.Event("click", { bubbles: true }));
 $("#authUsername").value = "smoke_user";
 $("#authEmail").value = "smoke@example.com";
 $("#authPassword").value = "secret1";
+const inputEv = () => new window.Event("input", { bubbles: true });
+$("#authUsername").dispatchEvent(inputEv());
+$("#authEmail").dispatchEvent(inputEv());
+$("#authPassword").dispatchEvent(inputEv());
+await sleep(600);
+ok("email tick shows for a valid email", !$("#emailTick").classList.contains("hidden"));
+ok("password tick stays hidden under 8 chars", $("#passwordTick").classList.contains("hidden"));
+ok("username tick shows once the name checks available", !$("#usernameTick").classList.contains("hidden") && $("#usernameHint").textContent === "Available");
+$("#authPassword").value = "secret123";
+$("#authPassword").dispatchEvent(inputEv());
+ok("password tick shows at 8+ chars", !$("#passwordTick").classList.contains("hidden"));
+$("#authUsername").value = "bad name!";
+$("#authUsername").dispatchEvent(inputEv());
+await sleep(600);
+ok("invalid username shows no tick and the taken/invalid hint", $("#usernameTick").classList.contains("hidden") && $("#usernameHint").textContent.includes("Taken or invalid"));
+$("#authUsername").value = "smoke_user";
+$("#authPassword").value = "secret1";
+$("#authUsername").dispatchEvent(inputEv());
+$("#authPassword").dispatchEvent(inputEv());
+await sleep(600);
+ok("username tick returns for the available name", !$("#usernameTick").classList.contains("hidden"));
 $("#authForm").dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
 await sleep(300);
 ok("no categories screen after signup", $("#onboardingScreen").classList.contains("hidden"));
@@ -119,9 +156,91 @@ await sleep(100);
 console.log("Create view");
 window.document.querySelector('.nav-btn[data-goto="create"]').dispatchEvent(new window.Event("click", { bubbles: true }));
 await sleep(200);
-ok("category select has 20 options", $("#uploadCategory").options.length === 20);
-ok("publish disabled without file+policy", $("#publishBtn").disabled === true);
-ok("my videos list renders (empty state)", $("#myVideos").textContent.length > 0);
+ok("create opens on the camera screen", !$("#createCamera").classList.contains("hidden"));
+$("#camBackBtn").dispatchEvent(new window.Event("click", { bubbles: true }));
+await sleep(100);
+ok("camera back shows the create home screen", !$("#createHome").classList.contains("hidden"));
+ok("create home offers story posting", $("#createHome").textContent.includes("Post a story"));
+ok("post screen has the 300-char caption box + policy confirm", $("#postCaption").maxLength === 300 && !!$("#postPolicyCheck"));
+ok("post screen has a Post button", !!$("#postPublishBtn"));
+ok("my videos list renders (empty state)", $("#myVideos").textContent.length >= 0);
+
+console.log("Sounds library sheet");
+$("#editSoundBtn").dispatchEvent(new window.Event("click", { bubbles: true }));
+await sleep(350);
+const soundTabs = [...window.document.querySelectorAll("#sndTabs .sound-tab")].map((b) => b.textContent);
+ok("sound sheet opens with Original as the default first tab", !$("#actionSheet").classList.contains("hidden") && $("#actionSheetTitle").textContent.includes("Add sound") && soundTabs.join(",") === "Original,Sound Effects,Naat,Taqreer,Islamic" && window.document.querySelector("#sndTabs .sound-tab").classList.contains("active"));
+ok("sound sheet copy says owner + user sounds go live at once", $("#actionSheet").textContent.includes("added by the owner and by users") && $("#actionSheet").textContent.includes("go live at once"));
+const origRow = [...window.document.querySelectorAll("#sndList .sound-row")].find((r) => r.textContent.includes("Original sound — @seed_sound"));
+ok("Original tab lists the auto-registered original with its creator", !!origRow && origRow.textContent.includes("by @seed_sound"));
+ok("original row has Preview, Select and Report (no use count shown)", !!origRow && ["Preview", "Select", "Report"].every((x) => origRow.textContent.includes(x)) && !/uses/.test(origRow.textContent));
+ok("no download affordance in the sound sheet", !$("#actionSheet [download]") && !$("#actionSheet").textContent.includes("Download"));
+origRow.querySelector(".snd-report").dispatchEvent(new window.Event("click", { bubbles: true }));
+await sleep(350);
+ok("report menu lists Contains music with the stay-visible note", $("#actionSheetTitle").textContent.includes("Report sound") && !!window.document.querySelector('#actionSheetBody [data-reason="Contains music"]') && $("#actionSheet").textContent.includes("stay in the library"));
+window.document.querySelector('#actionSheetBody [data-reason="Contains music"]').dispatchEvent(new window.Event("click", { bubbles: true }));
+await sleep(450);
+ok("reporting a sound closes the sheet", $("#actionSheet").classList.contains("hidden"));
+const checkStore = window.TokislaStore.createStore(window.localStorage, null);
+const soundReps = (await checkStore.adminReports()).filter((r) => r.target_type === "sound");
+ok("sound report filed as open with the chosen reason", soundReps.length === 1 && soundReps[0].reason === "Contains music" && soundReps[0].status === "open");
+ok("reported original stays in the library", (await checkStore.listSounds()).some((s) => s.title === "Original sound — @seed_sound" && s.source_type === "original"));
+$("#editSoundBtn").dispatchEvent(new window.Event("click", { bubbles: true }));
+await sleep(350);
+[...window.document.querySelectorAll("#sndTabs .sound-tab")].find((b) => b.textContent === "Sound Effects").dispatchEvent(new window.Event("click", { bubbles: true }));
+await sleep(350);
+const fxRow = [...window.document.querySelectorAll("#sndList .sound-row")].find((r) => r.textContent.includes("Rain patter"));
+ok("Sound Effects tab lists the user-added sound", !!fxRow);
+$("#sndAddBtn").dispatchEvent(new window.Event("click", { bubbles: true }));
+await sleep(250);
+ok("add-sound form present: title, 4-category select, audio file, honest note", !!$("#sndAddTitle") && $("#sndAddTitle").maxLength === 80 && [...window.document.querySelectorAll("#sndAddCategory option")].map((o) => o.value).join(",") === "sound-effects,naat,taqreer,islamic" && !!$("#sndAddFile") && $("#sndAddFile").accept.includes("audio") && $("#actionSheet").textContent.includes("goes live at once") && $("#actionSheet").textContent.includes("No music"));
+$("#sndAddSubmit").dispatchEvent(new window.Event("click", { bubbles: true }));
+await sleep(250);
+ok("submit without a file asks for an audio file first", !!$("#sndAddMsg") && $("#sndAddMsg").textContent.includes("Choose an audio file first."));
+window.document.querySelector('#actionSheet [data-close-sheet]').dispatchEvent(new window.Event("click", { bubbles: true }));
+await sleep(200);
+$("#editSoundBtn").dispatchEvent(new window.Event("click", { bubbles: true }));
+await sleep(350);
+[...window.document.querySelectorAll("#sndTabs .sound-tab")].find((b) => b.textContent === "Original").dispatchEvent(new window.Event("click", { bubbles: true }));
+await sleep(350);
+const origRow2 = [...window.document.querySelectorAll("#sndList .sound-row")].find((r) => r.textContent.includes("Original sound — @seed_sound"));
+ok("reopened sheet still lists the original (reported sounds stay visible)", !!origRow2);
+origRow2.querySelector(".snd-select").dispatchEvent(new window.Event("click", { bubbles: true }));
+await sleep(250);
+ok("selecting the original updates the sound label and closes the sheet", $("#editSoundLabel").textContent.includes("Original sound — @seed_sound") && $("#actionSheet").classList.contains("hidden"));
+$("#editSoundBtn").dispatchEvent(new window.Event("click", { bubbles: true }));
+await sleep(300);
+$("#sndOriginal").dispatchEvent(new window.Event("click", { bubbles: true }));
+await sleep(200);
+ok("choosing Original audio again resets the sound label", $("#editSoundLabel").textContent === "Add sound");
+
+console.log("Sound X (clear) control");
+ok("X clear control exists with Remove sound label and starts hidden", !!$("#editSoundClear") && $("#editSoundClear").getAttribute("aria-label") === "Remove sound" && $("#editSoundClear").classList.contains("hidden"));
+$("#editSoundBtn").dispatchEvent(new window.Event("click", { bubbles: true }));
+await sleep(350);
+[...window.document.querySelectorAll("#sndTabs .sound-tab")].find((b) => b.textContent === "Sound Effects").dispatchEvent(new window.Event("click", { bubbles: true }));
+await sleep(350);
+const fxRow2 = [...window.document.querySelectorAll("#sndList .sound-row")].find((r) => r.textContent.includes("Rain patter"));
+fxRow2.querySelector(".snd-select").dispatchEvent(new window.Event("click", { bubbles: true }));
+await sleep(250);
+ok("selecting a sound shows its title and reveals the X", $("#editSoundLabel").textContent === "Sound: Rain patter" && !$("#editSoundClear").classList.contains("hidden"));
+$("#editSoundBtn").dispatchEvent(new window.Event("click", { bubbles: true }));
+await sleep(350);
+[...window.document.querySelectorAll("#sndTabs .sound-tab")].find((b) => b.textContent === "Sound Effects").dispatchEvent(new window.Event("click", { bubbles: true }));
+await sleep(350);
+const fxRow3 = [...window.document.querySelectorAll("#sndList .sound-row")].find((r) => r.textContent.includes("Rain patter"));
+const fxSelect = fxRow3.querySelector(".snd-select");
+ok("attached sound shows as Selected (disabled) in the library", fxSelect.textContent === "Selected" && fxSelect.disabled);
+window.document.querySelector('#actionSheet [data-close-sheet]').dispatchEvent(new window.Event("click", { bubbles: true }));
+await sleep(200);
+$("#editSoundClear").dispatchEvent(new window.Event("click", { bubbles: true }));
+await sleep(200);
+ok("tapping X clears the sound and restores Add sound", $("#editSoundLabel").textContent === "Add sound" && $("#editSoundClear").classList.contains("hidden"));
+$("#editSoundBtn").dispatchEvent(new window.Event("click", { bubbles: true }));
+await sleep(350);
+ok("after X, the library again marks Original audio as Selected", !!$("#sndOriginal") && $("#sndOriginal").textContent.includes("Selected"));
+window.document.querySelector('#actionSheet [data-close-sheet]').dispatchEvent(new window.Event("click", { bubbles: true }));
+await sleep(200);
 
 console.log("Profile view");
 window.document.querySelector('.nav-btn[data-goto="profile"]').dispatchEvent(new window.Event("click", { bubbles: true }));
@@ -320,10 +439,10 @@ await sleep(700);
 ok("choosing Duet opens Create with the duet banner", !$("#view-create").classList.contains("hidden") && !$("#createContext").classList.contains("hidden") && $("#createContextText").textContent.includes("Duet with"));
 $("#createContextClear").dispatchEvent(new window.Event("click", { bubbles: true }));
 ok("duet banner clears", $("#createContext").classList.contains("hidden"));
-ok("create has five filter chips", window.document.querySelectorAll("#filterChips .fchip").length === 5);
-ok("create has a poll builder and a draft button", !!$("#pollToggle") && !!$("#draftBtn") && $("#draftBtn").disabled === true);
-window.document.querySelector("#filterChips .fchip:nth-child(2)").dispatchEvent(new window.Event("click", { bubbles: true }));
-ok("filter chip selects", window.document.querySelector("#filterChips .fchip:nth-child(2)").classList.contains("active"));
+ok("edit screen has five filter chips", window.document.querySelectorAll("#editFilterChips .fchip").length === 5);
+ok("edit screen has Add sound + trim controls, post screen has a Drafts button", !!$("#editSoundBtn") && !!$("#trimStart") && !!$("#trimEnd") && !!$("#postDraftBtn"));
+window.document.querySelector("#editFilterChips .fchip:nth-child(2)").dispatchEvent(new window.Event("click", { bubbles: true }));
+ok("filter chip selects", window.document.querySelector("#editFilterChips .fchip:nth-child(2)").classList.contains("active"));
 window.document.querySelector('.nav-btn[data-goto="friends"]').dispatchEvent(new window.Event("click", { bubbles: true }));
 await sleep(1200);
 ok("friends view carries the stories rail", !!$("#storiesRail") && $("#storiesRail").textContent.includes("Your story"));

@@ -34,16 +34,25 @@
     <form id="authForm">
       <div id="usernameField" class="field hidden">
         <label>Username</label>
-        <input id="authUsername" type="text" autocomplete="username" placeholder="e.g. ahmad_reads" maxlength="24">
+        <div class="input-wrap">
+          <input id="authUsername" type="text" autocomplete="username" placeholder="e.g. ahmad_reads" maxlength="24">
+          <span id="usernameTick" class="valid-tick hidden" role="img" aria-label="Username available"></span>
+        </div>
         <small id="usernameHint" class="hint"></small>
       </div>
       <div class="field">
         <label>Email</label>
-        <input id="authEmail" type="email" autocomplete="email" placeholder="you@example.com" required>
+        <div class="input-wrap">
+          <input id="authEmail" type="email" autocomplete="email" placeholder="you@example.com" required>
+          <span id="emailTick" class="valid-tick hidden" role="img" aria-label="Valid email"></span>
+        </div>
       </div>
       <div class="field">
         <label>Password</label>
-        <input id="authPassword" type="password" autocomplete="current-password" placeholder="••••••••" required>
+        <div class="input-wrap">
+          <input id="authPassword" type="password" autocomplete="current-password" placeholder="••••••••" required>
+          <span id="passwordTick" class="valid-tick hidden" role="img" aria-label="Password is at least 8 characters"></span>
+        </div>
       </div>
       <div id="authError" class="form-error hidden"></div>
       <button type="submit" id="authSubmit" class="btn btn-primary btn-block">Log in</button>
@@ -84,7 +93,7 @@
       <div id="feedEmpty" class="empty-state hidden">
         <div class="empty-icon"><span data-icon="leaf"></span></div>
         <h3>No videos yet</h3>
-        <p class="muted">Approved videos will appear here. Be the first to create something positive.</p>
+        <p class="muted">Videos will appear here as soon as someone posts one. Be the first to create something positive.</p>
         <button class="btn btn-primary" data-goto="create">Create a video</button>
       </div>
     </section>
@@ -119,43 +128,115 @@
       </div>
     </section>
 
-    <!-- CREATE -->
+    <!-- CREATE: camera -> edit -> post (TikTok-style flow). Posts go live
+         immediately; there is no pre-publication review. -->
     <section id="view-create" class="view hidden">
-      <div class="page-head"><h2>Create</h2><p class="muted">Short, positive, under 20 seconds.</p></div>
-      <div id="createBox" class="card">
-        <div id="createContext" class="ctx-banner hidden"><span id="createContextText"></span><button id="createContextClear" class="ctx-clear" aria-label="Clear"><span data-icon="close"></span></button></div>
-        <button id="storyBtn" class="btn btn-ghost btn-block" style="margin-bottom:10px"><span data-icon="plus"></span> Post a story (photo or short video)</button>
-        <input id="storyFile" type="file" accept="image/*,video/*" hidden>
-        <input id="videoFile" type="file" accept="video/*" hidden>
-        <input id="avatarFile" type="file" accept="image/*" hidden>
-        <button id="pickVideoBtn" class="btn btn-primary btn-block"><span data-icon="video"></span> Choose a video</button>
-        <video id="uploadPreview" class="upload-preview hidden" controls playsinline></video>
-        <div id="uploadMeta" class="tiny muted"></div>
-        <div class="field"><label>Caption</label>
-          <textarea id="uploadCaption" rows="2" maxlength="300" placeholder="Say something positive… use #hashtags"></textarea></div>
-        <div class="field"><label>Category</label><select id="uploadCategory"></select></div>
-        <div class="field"><label>Filter</label><div id="filterChips" class="filter-chips"></div></div>
-        <label class="check-row"><input type="checkbox" id="pollToggle"> Add a poll (question + two options)</label>
-        <div id="pollFields" class="hidden">
-          <div class="field"><label>Poll question</label><input id="pollQ" maxlength="80" placeholder="Ask something..."></div>
-          <div class="field"><label>Option 1</label><input id="pollA" maxlength="30"></div>
-          <div class="field"><label>Option 2</label><input id="pollB" maxlength="30"></div>
+      <div id="createContext" class="ctx-banner hidden"><span id="createContextText"></span><button id="createContextClear" class="ctx-clear" aria-label="Clear"><span data-icon="close"></span></button></div>
+      <input id="storyFile" type="file" accept="image/*,video/*" hidden>
+      <input id="videoFile" type="file" accept="video/*" hidden>
+      <input id="avatarFile" type="file" accept="image/*" hidden>
+
+      <!-- Step 1: camera -->
+      <div id="createCamera" class="create-screen">
+        <div class="cam-head">
+          <button id="camBackBtn" class="icon-btn cam-icon-btn" aria-label="Back to Create"><span data-icon="back"></span></button>
+          <h2>Record</h2>
+          <button id="camMyVideosBtn" class="link-btn" style="margin:0">My videos</button>
         </div>
-        <div class="field"><label>Who can see it</label>
-          <select id="uploadVisibility">
-            <option value="public">Everyone (public)</option>
-            <option value="followers">Followers only</option>
-            <option value="private">Only me (private)</option>
-          </select></div>
-        <label class="check-row"><input type="checkbox" id="policyCheck"> I confirm this video follows the Community Guidelines (no music, no inappropriate content).</label>
-        <div class="progress hidden" id="uploadProgressWrap"><div class="progress-bar" id="uploadProgress"></div></div>
-        <div id="uploadMsg" class="tiny"></div>
-        <button id="publishBtn" class="btn btn-primary btn-block" disabled>Publish for review</button>
-        <button id="draftBtn" class="btn btn-ghost btn-block" style="margin-top:8px" disabled>Save as draft</button>
-        <p class="tiny muted center">Every video is reviewed before it appears in the public feed.</p>
+        <div class="cam-stage">
+          <video id="camVideo" autoplay muted playsinline></video>
+          <div id="camUnavailable" class="cam-unavailable hidden">Camera is not available on this device or permission was denied. You can still pick a video from your gallery below — the flow does not stop here.</div>
+        </div>
+        <div id="camFilterChips" class="filter-chips cam-filters"></div>
+        <div class="cam-timer-row"><span id="camTimer">0.0s / 20s</span><div class="cam-progress"><i id="camProgress"></i></div></div>
+        <div class="cam-controls">
+          <button id="camGalleryBtn" class="btn btn-ghost"><span data-icon="video"></span> Gallery</button>
+          <button id="camRecordBtn" class="cam-record" aria-label="Record video"><span class="cam-record-dot"></span></button>
+          <button id="camFlipBtn" class="btn btn-ghost" type="button">Flip</button>
+        </div>
+        <p id="camMsg" class="tiny muted center"></p>
+        <p class="tiny muted center">Tap the red button to start, tap again to stop. Max 20 seconds. Original audio only unless you add a sound from the library on the next screen — no music is allowed on Tokisla.</p>
       </div>
-      <h3 class="section-title">My videos &amp; review status</h3>
-      <div id="myVideos" class="list"></div>
+
+      <!-- Step 2: edit -->
+      <div id="createEdit" class="create-screen hidden">
+        <div class="edit-top">
+          <button id="editSoundBtn" class="btn btn-ghost edit-sound-btn"><span data-icon="play"></span> <span id="editSoundLabel">Add sound</span></button>
+          <button id="editSoundClear" class="icon-btn edit-sound-clear hidden" type="button" aria-label="Remove sound"><span data-icon="close"></span></button>
+        </div>
+        <div class="edit-stage">
+          <video id="editPreview" class="edit-preview" loop playsinline preload="metadata"></video>
+          <div id="editTextOverlay" class="edit-text-overlay hidden"></div>
+          <div class="edit-rail">
+            <button id="toolTextBtn" class="edit-tool" type="button"><span>Text</span></button>
+            <button id="toolFilterBtn" class="edit-tool" type="button"><span>Filters</span></button>
+            <button id="toolCropBtn" class="edit-tool" type="button"><span>Crop</span></button>
+          </div>
+        </div>
+        <div id="editMeta" class="tiny muted center"></div>
+        <div id="toolTextPanel" class="edit-panel hidden">
+          <div class="field"><label>Text on video</label><input id="editTextInput" maxlength="60" placeholder="Write something..."></div>
+        </div>
+        <div id="toolFilterPanel" class="edit-panel hidden">
+          <div class="field"><label>Filter</label><div id="editFilterChips" class="filter-chips"></div></div>
+        </div>
+        <div id="toolCropPanel" class="edit-panel hidden">
+          <div class="field"><label>Trim (Crop) — keep a part within 20 seconds</label>
+            <input id="trimStart" type="range" min="0" max="20" step="0.1" value="0">
+            <input id="trimEnd" type="range" min="0" max="20" step="0.1" value="20">
+            <div id="trimLabel" class="tiny muted"></div>
+          </div>
+        </div>
+        <button id="editNextBtn" class="btn btn-primary btn-block">Next</button>
+        <button id="editBackBtn" class="btn btn-ghost btn-block" style="margin-top:8px">Back</button>
+      </div>
+
+      <!-- Step 3: post (screenshot layout) -->
+      <div id="createPost" class="create-screen hidden">
+        <div class="post-top">
+          <div class="post-desc">
+            <label for="postCaption">Add description...</label>
+            <textarea id="postCaption" rows="4" maxlength="300" placeholder="Add description..."></textarea>
+            <div class="post-tag-row">
+              <button id="postHashtagBtn" class="post-tag-btn" type="button"># Hashtags</button>
+              <button id="postMentionBtn" class="post-tag-btn" type="button">@ Mention</button>
+            </div>
+          </div>
+          <div class="post-thumb-col">
+            <video id="postPreviewVideo" class="post-thumb" muted loop playsinline preload="metadata"></video>
+            <button id="postCoverBtn" class="link-btn post-cover-btn" type="button">Edit cover</button>
+          </div>
+        </div>
+        <button id="rowDisclosure" class="post-row" type="button"><span class="post-row-label">Content disclosure and ads</span><span id="disclosureState" class="muted">Off</span><span aria-hidden="true">›</span></button>
+        <button id="rowLocation" class="post-row" type="button"><span class="post-row-label">Location</span><span id="locationState" class="muted">Add location</span><span aria-hidden="true">›</span></button>
+        <button id="rowLink" class="post-row" type="button"><span class="post-row-label">Add link</span><span id="linkState" class="muted">None</span><span aria-hidden="true">›</span></button>
+        <button id="rowVisibility" class="post-row" type="button"><span class="post-row-label" id="visibilityLabel">Everyone can view this post</span><span id="visibilityState" class="muted">Everyone</span><span aria-hidden="true">›</span></button>
+        <button id="rowMore" class="post-row" type="button"><span class="post-row-label">More options</span><span aria-hidden="true">›</span></button>
+        <label class="check-row"><input type="checkbox" id="postPolicyCheck"> I confirm this video follows the Community Guidelines (no music, no women, nothing haram).</label>
+        <div id="postMsg" class="tiny"></div>
+        <div class="post-actions">
+          <button id="postDraftBtn" class="btn btn-ghost" type="button">Drafts</button>
+          <button id="postPublishBtn" class="btn btn-primary" type="button">Post</button>
+        </div>
+        <button id="postBackBtn" class="btn btn-ghost btn-block" style="margin-top:8px" type="button">Back to edit</button>
+        <p class="tiny muted center">Posts go live immediately. Videos that break the rules (music, women, haram content) are removed when reported, and strikes apply.</p>
+      </div>
+
+      <!-- Create home: stories + my videos -->
+      <div id="createHome" class="create-screen hidden">
+        <div class="page-head"><h2>Create</h2><p class="muted">Short, positive, under 20 seconds.</p></div>
+        <button id="homeRecordBtn" class="btn btn-primary btn-block"><span data-icon="video"></span> Record a video</button>
+        <button id="homeGalleryBtn" class="btn btn-ghost btn-block" style="margin-top:8px"><span data-icon="video"></span> Choose from gallery</button>
+        <button id="storyBtn" class="btn btn-ghost btn-block" style="margin-top:8px"><span data-icon="plus"></span> Post a story (photo or short video)</button>
+        <h3 class="section-title">My videos</h3>
+        <div id="myVideos" class="list"></div>
+      </div>
+
+      <!-- Circular posting countdown -->
+      <div id="postCountdown" class="post-countdown hidden" aria-live="polite">
+        <svg class="count-ring" viewBox="0 0 84 84" aria-hidden="true"><circle class="count-ring-bg" cx="42" cy="42" r="34"></circle><circle id="countRingFg" class="count-ring-fg" cx="42" cy="42" r="34"></circle></svg>
+        <div class="count-label">Posting…</div>
+      </div>
     </section>
 
     <!-- NOTIFICATIONS -->
@@ -217,7 +298,7 @@
 <div id="toast" class="toast hidden"></div>
 
 <script src="config.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="vendor/appwrite-sdk.js"></script><!-- Appwrite Web SDK 29.2.0 (IIFE), vendored 2026-11-03; see MIGRATION_NOTES.md -->
 <script src="store.js"></script>
 <script src="app.js"></script>
 </body>

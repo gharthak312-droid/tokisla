@@ -1,0 +1,1 @@
+{"dependencies":{"node-appwrite":"31.1.0"},"description":"Tokisla video creation: validates an already-uploaded media file and creates the video row for Appwrite Cloud Functions.","engines":{"node":">=20"},"main":"index.js","name":"tokisla-create-upload","private":true,"type":"module","version":"1.0.0"}

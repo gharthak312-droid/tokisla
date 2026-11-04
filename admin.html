@@ -83,6 +83,7 @@
       <button class="tab" data-tab="stories">Stories <span id="storyCount"></span></button>
       <button class="tab" data-tab="reports">Reports</button>
       <button class="tab" data-tab="users">Users</button>
+      <button class="tab" data-tab="sounds">Sounds</button>
       <button class="tab" data-tab="categories">Categories</button>
       <button class="tab" data-tab="log">Decisions Log</button>
     </div>
@@ -91,7 +92,7 @@
       <div class="stats" id="statCards"></div>
       <div class="card" style="margin-top:14px">
         <h3 style="margin:0 0 6px">How moderation works</h3>
-        <p class="muted" style="line-height:1.6;margin:0">Every uploaded video stays <b>Pending</b> and invisible to the public until you approve it here. Watch and listen to each video, then Approve, Reject (with a reason the creator will see), or mark Needs review. Reports from users appear in the Reports tab. Nothing is published automatically.</p>
+        <p class="muted" style="line-height:1.6;margin:0">Posts go live <b>immediately</b> — there is no pre-publication review and nothing waits here to be published. When a video is reported for breaking the rules (music, women, haram content), act on it in the Reports tab: remove it and apply a strike. The Moderation Queue below only holds older videos that were pending before this change. You can still Approve, Reject (with a reason the creator will see), or mark Needs review on those.</p>
       </div>
     </section>
 
@@ -99,6 +100,34 @@
     <section id="tab-stories" class="hidden"><div id="storyList"></div></section>
     <section id="tab-reports" class="hidden"><div id="reportList"></div></section>
     <section id="tab-users" class="hidden"><div id="verifyBox"></div><div id="userList"></div></section>
+    <section id="tab-sounds" class="hidden">
+      <div class="card" style="margin-bottom:12px">
+        <h3 style="margin:0 0 6px">Add a sound</h3>
+        <p class="muted small" style="margin:0 0 12px;line-height:1.6">Only sound effects, naats, taqreers and other Islamic audio. No music, no instruments, no songs. Add only audio you own or have rights to use. Sounds are also added by users in the app and go live at once — there is no approval step. Original sounds from videos appear in the list too. When a sound is reported for breaking the rules, remove it here.</p>
+        <div class="field"><label>Title</label><input id="soundTitle" maxlength="80" placeholder="e.g. Birds chirping"></div>
+        <div class="field"><label>Category</label><select id="soundCategory">
+          <option value="sound-effects">Sound Effects</option>
+          <option value="naat">Naat</option>
+          <option value="taqreer">Taqreer</option>
+          <option value="islamic">Islamic</option>
+        </select></div>
+        <div class="field"><label>Audio file</label><input id="soundFile" type="file" accept="audio/*"></div>
+        <div class="field"><label>Source / licence note</label><input id="soundSource" maxlength="120" placeholder="e.g. Recorded by me / CC0"></div>
+        <button class="btn btn-primary" id="addSoundBtn">Add sound</button>
+        <div id="soundMsg" class="small" style="margin-top:8px"></div>
+      </div>
+      <div class="card" style="margin-bottom:12px">
+        <div class="field" style="margin-bottom:0"><label>Show category</label><select id="soundFilter">
+          <option value="all">All categories</option>
+          <option value="original">Original</option>
+          <option value="sound-effects">Sound Effects</option>
+          <option value="naat">Naat</option>
+          <option value="taqreer">Taqreer</option>
+          <option value="islamic">Islamic</option>
+        </select></div>
+      </div>
+      <div id="soundList"></div>
+    </section>
     <section id="tab-categories" class="hidden">
       <div class="card" style="margin-bottom:12px">
         <h3 style="margin:0 0 8px">Add a category</h3>
@@ -113,7 +142,7 @@
 <div id="toast" class="toast hidden"></div>
 
 <script src="config.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="vendor/appwrite-sdk.js"></script><!-- Appwrite Web SDK 29.2.0 (IIFE), vendored 2026-11-03; see MIGRATION_NOTES.md -->
 <script src="store.js"></script>
 <script>
 (function () {
@@ -121,17 +150,28 @@
   const $ = (s, r) => (r || document).querySelector(s);
   const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
   const CFG = window.TOKISLA_CONFIG, DEMO = window.TokislaStore.DEMO;
-  let sb = null;
-  if (!DEMO && window.supabase) sb = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY);
-  const store = window.TokislaStore.createStore(window.localStorage, sb);
+  let backend = null;
+  if (!DEMO && window.Appwrite) {
+    const client = new window.Appwrite.Client().setEndpoint(CFG.APPWRITE_ENDPOINT).setProject(CFG.APPWRITE_PROJECT_ID);
+    backend = {
+      client,
+      account: new window.Appwrite.Account(client),
+      tables: new window.Appwrite.TablesDB(client),
+      storage: new window.Appwrite.Storage(client),
+      functions: new window.Appwrite.Functions(client),
+      Query: window.Appwrite.Query,
+      Permission: window.Appwrite.Permission,
+      Role: window.Appwrite.Role,
+      ID: window.Appwrite.ID,
+    };
+  }
+  const store = window.TokislaStore.createStore(window.localStorage, backend);
   let me = null;
   const REASONS = ["Contains music", "Inappropriate content", "Spam or misleading", "Abuse or harassment", "Religious disrespect", "Low quality / unclear", "Other"];
 
   function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.remove("hidden"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.add("hidden"), 2600); }
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
   function ago(iso) { const s = (Date.now() - new Date(iso).getTime()) / 1000; if (s < 3600) return Math.max(1, Math.floor(s / 60)) + "m ago"; if (s < 86400) return Math.floor(s / 3600) + "h ago"; return Math.floor(s / 86400) + "d ago"; }
-  function catName(id) { const c = window.TokislaStore.CATEGORIES.find((x) => x.id === id); return c ? c.name : ("#" + id); }
-
   async function boot() {
     if (DEMO) { $("#modeBadge").classList.remove("hidden"); $("#demoCreds").classList.remove("hidden"); await store.ensureDemoAdmin(); }
     me = await store.currentUser().catch(() => null);
@@ -160,10 +200,67 @@
   }
   $$(".tab").forEach((t) => t.addEventListener("click", () => {
     $$(".tab").forEach((x) => x.classList.toggle("active", x === t));
-    ["dashboard", "queue", "stories", "reports", "users", "categories", "log"].forEach((n) => $("#tab-" + n).classList.toggle("hidden", n !== t.dataset.tab));
+    ["dashboard", "queue", "stories", "reports", "users", "sounds", "categories", "log"].forEach((n) => $("#tab-" + n).classList.toggle("hidden", n !== t.dataset.tab));
     refreshAll();
   }));
-  async function refreshAll() { renderStats(); renderQueue(); renderStories(); renderReports(); renderUsers(); renderVerify(); renderCategories(); renderLog(); }
+  async function refreshAll() { renderStats(); renderQueue(); renderStories(); renderReports(); renderUsers(); renderVerify(); renderSounds(); renderCategories(); renderLog(); }
+
+  /* ---- Sounds library (admin adds audio; users add sounds too, direct-to-library; originals auto-register) ---- */
+  function soundDurationOf(file) {
+    return new Promise((resolve) => {
+      try {
+        const url = URL.createObjectURL(file);
+        const a = new Audio();
+        a.preload = "metadata";
+        a.onloadedmetadata = () => { const d = a.duration || null; URL.revokeObjectURL(url); resolve(d); };
+        a.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+        a.src = url;
+      } catch (e) { resolve(null); }
+    });
+  }
+  async function renderSounds() {
+    const box = $("#soundList"); if (!box) return;
+    const list = await store.listSounds().catch(() => []);
+    const filter = $("#soundFilter") ? $("#soundFilter").value : "all";
+    const shown = filter === "all" ? list
+      : filter === "original" ? list.filter((s) => s.source_type === "original" || s.category === "original")
+      : list.filter((s) => s.category === filter);
+    const catLabel = (slug) => ({ "sound-effects": "Sound Effects", naat: "Naat", taqreer: "Taqreer", islamic: "Islamic", original: "Original" })[slug] || slug;
+    const sourceLabel = (s) => s.source_type === "original" ? "Original" : s.source_type === "user" ? "User-added" : s.source_type === "catalog" ? "Catalog" : "Admin";
+    box.innerHTML = shown.length ? "" : '<div class="card"><p class="muted" style="margin:0">Abhi koi sound nahi hai. No sounds in this category yet — add one with the form above.</p></div>';
+    shown.forEach((s) => {
+      const el = document.createElement("div");
+      el.className = "row-item";
+      const creatorLabel = s.creator_username ? "@" + s.creator_username : s.creator_id ? "Creator " + String(s.creator_id).slice(0, 12) : "";
+      // Sounds are streaming-only: the preview below is an <audio>
+      // element with controlsList="nodownload" (no download entry in
+      // the native controls). No download button, link, or save
+      // affordance for sound files exists anywhere in this panel.
+      el.innerHTML = `<div class="grow"><div style="font-weight:600">${esc(s.title)}</div>
+        <div class="small muted">${esc(catLabel(s.category))}${s.duration_seconds ? " · " + Number(s.duration_seconds).toFixed(0) + "s" : ""}${s.source ? " · " + esc(s.source) : ""} · ${esc(sourceLabel(s))}${creatorLabel ? " · by " + esc(creatorLabel) : ""} · ${esc(s.status || "live")}</div></div>
+        ${s.src ? `<audio src="${esc(s.src)}" controls controlsList="nodownload" preload="none" style="max-width:180px"></audio>` : ""}
+        <button class="btn btn-danger" style="height:37px">Remove</button>`;
+      el.querySelector("button").addEventListener("click", async () => {
+        try { await store.deleteSound(me.id, s.id); toast("Sound removed."); renderSounds(); }
+        catch (ex) { toast(ex.message); }
+      });
+      box.appendChild(el);
+    });
+  }
+  $("#soundFilter").addEventListener("change", renderSounds);
+  $("#addSoundBtn").addEventListener("click", async () => {
+    const msg = $("#soundMsg"); msg.textContent = "";
+    const file = $("#soundFile").files && $("#soundFile").files[0];
+    if (!file) { msg.textContent = "Choose an audio file first."; return; }
+    try {
+      const duration = await soundDurationOf(file);
+      await store.addSound(me.id, { title: $("#soundTitle").value, category: $("#soundCategory").value, file, duration_seconds: duration, source: $("#soundSource").value });
+      $("#soundTitle").value = ""; $("#soundSource").value = ""; $("#soundFile").value = "";
+      msg.textContent = "Sound added to the library.";
+      toast("Sound added to the library.");
+      renderSounds();
+    } catch (ex) { msg.textContent = ex.message; }
+  });
 
   async function renderStories() {
     const list = await store.adminStoryQueue().catch(() => []);
@@ -214,7 +311,7 @@
   async function renderQueue() {
     const list = await store.adminQueue().catch(() => []);
     const box = $("#queueList");
-    box.innerHTML = list.length ? "" : '<div class="card"><p class="muted" style="margin:0">The queue is empty — nothing is waiting for review.</p></div>';
+    box.innerHTML = list.length ? "" : '<div class="card"><p class="muted" style="margin:0">The queue is empty. New posts go live immediately and do not wait here — this queue only holds older pending videos.</p></div>';
     list.forEach((v) => {
       const el = document.createElement("div");
       el.className = "queue-item";
@@ -226,7 +323,8 @@
           <div style="font-weight:700;font-size:16px">${esc(v.caption || "Untitled")}</div>
           <dl class="meta">
             <dt>Creator</dt><dd>@${esc(v.username || v.creator_id)}</dd>
-            <dt>Category</dt><dd>${esc((v.category_ids || []).map(catName).join(", ") || "—")}</dd>
+            <dt>Location</dt><dd>${esc(v.location || "—")}</dd>
+            <dt>Sound</dt><dd>${esc(v.sound_title || "Original audio")}</dd>
             <dt>Duration</dt><dd>${v.duration_seconds}s (limit ${CFG.MAX_VIDEO_SECONDS}s)</dd>
             <dt>Size</dt><dd>${v.size_bytes ? (v.size_bytes / 1048576).toFixed(1) + " MB" : "—"}</dd>
             <dt>Visibility</dt><dd>${esc(v.visibility)}</dd>
@@ -262,11 +360,21 @@
     list.forEach((r) => {
       const el = document.createElement("div");
       el.className = "row-item";
-      el.innerHTML = `<div class="grow"><div style="font-weight:600">${esc(r.target_type)} — ${esc(r.reason)}</div>
+      const isSound = r.target_type === "sound";
+      el.innerHTML = `<div class="grow"><div style="font-weight:600">${esc(isSound ? "Sound" : r.target_type)} — ${esc(r.reason)}</div>
         <div class="small muted">Target: ${esc(String(r.target_id).slice(0, 18))} · ${ago(r.created_at)}</div></div>
         <span class="status open">open</span>
+        ${isSound ? '<button class="btn btn-danger" data-remove-sound style="height:37px">Remove sound</button>' : ""}
         <button class="btn btn-ghost" data-act="reviewed" style="height:37px">Mark reviewed</button>
         <button class="btn btn-ghost" data-act="dismissed" style="height:37px">Dismiss</button>`;
+      const rm = el.querySelector("[data-remove-sound]");
+      if (rm) rm.addEventListener("click", async () => {
+        try {
+          await store.deleteSound(me.id, r.target_id);
+          await store.adminSetReportStatus(r.id, "reviewed");
+          toast("Sound removed."); refreshAll();
+        } catch (ex) { toast(ex.message); }
+      });
       el.querySelectorAll("[data-act]").forEach((b) => b.addEventListener("click", async () => {
         await store.adminSetReportStatus(r.id, b.dataset.act); toast("Report " + b.dataset.act + "."); refreshAll();
       }));
