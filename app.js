@@ -193,10 +193,29 @@
     if (checkOnboarding && me && !(prefs.category_ids || []).length) { showOnboarding(); return; }
     enterApp();
   }
+  /* Desktop sidebar auth area: logged-out shows Log in, logged-in shows
+     the profile entry. Called from enterApp, the funnel for every auth
+     transition (log in, guest, log out, delete, boot). */
+  function renderSidebarAuth() {
+    const out = $("#sideLoggedOut"), prof = $("#sideLoggedIn");
+    if (!out || !prof) return;
+    const logged = !!me;
+    out.classList.toggle("hidden", logged);
+    prof.classList.toggle("hidden", !logged);
+    if (logged) {
+      const av = $("#sideAvatar");
+      if (av) av.innerHTML = avatarHtml(me, "side-avatar");
+      const nm = $("#sideName");
+      if (nm) nm.textContent = me.display_name || me.username || "";
+      const hd = $("#sideHandle");
+      if (hd) hd.textContent = me.username ? "@" + me.username : "";
+    }
+  }
   function enterApp() {
     $("#onboardingScreen").classList.add("hidden");
     $("#authScreen").classList.add("hidden");
     $("#appShell").classList.remove("hidden");
+    renderSidebarAuth();
     goto("home");
     refreshNotifDot();
   }
@@ -304,6 +323,10 @@
     $$(".view").forEach((v) => v.classList.add("hidden"));
     $("#view-" + view).classList.remove("hidden");
     $$(".nav-btn").forEach((b) => b.classList.toggle("active", b.dataset.goto === view));
+    $$(".side-link").forEach((b) => b.classList.toggle("active", b.dataset.goto === view));
+    const sf = $("#sideForYou"), sg = $("#sideFollowing");
+    if (sf) sf.classList.toggle("active", view === "home" && feedKind === "foryou");
+    if (sg) sg.classList.toggle("active", view === "home" && feedKind === "following");
     $("#topBar").style.display = view === "home" ? "flex" : "none";
     if (view !== "home") pauseAllVideos();
     if (view === "home") loadFeed();
@@ -324,6 +347,19 @@
     if ((v === "create" || v === "notifications") && !me) { needLogin(); return; }
     goto(v);
   }));
+  /* Desktop sidebar: same handlers/routes as the mobile chrome.
+     data-goto items above are bound by the generic handler; the rest
+     call the existing functions directly (no new views, no new logic). */
+  const sideLogin = $("#sideLoginBtn");
+  if (sideLogin) sideLogin.addEventListener("click", showAuth);
+  const sideForYou = $("#sideForYou");
+  if (sideForYou) sideForYou.addEventListener("click", () => { goto("home"); setFeedKind("foryou"); });
+  const sideFollowing = $("#sideFollowing");
+  if (sideFollowing) sideFollowing.addEventListener("click", () => { goto("home"); setFeedKind("following"); });
+  const sideSearch = $("#sideSearch");
+  if (sideSearch) sideSearch.addEventListener("click", () => goto("discover"));
+  const sideMore = $("#sideMore");
+  if (sideMore) sideMore.addEventListener("click", settingsSheet);
   /* Android/browser Back: one step back at a time; only on the video feed
      (with nothing open) does the next Back leave/close the app. A single
      sentinel history entry drives this: each Back consumes it, the handler
@@ -382,6 +418,9 @@
     feedKind = k;
     $("#feedForYouBtn").classList.toggle("active", k === "foryou");
     $("#feedFollowingBtn").classList.toggle("active", k === "following");
+    const sf2 = $("#sideForYou"), sg2 = $("#sideFollowing");
+    if (sf2) sf2.classList.toggle("active", k === "foryou");
+    if (sg2) sg2.classList.toggle("active", k === "following");
     loadFeed();
   }
 

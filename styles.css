@@ -209,6 +209,41 @@ body{background:#07070C}
   .demo-badge{top:calc(max(0px,calc((100dvh - 892px)/2)) + 10px)}
 }
 
+/* Desktop sidebar (TikTok-web shape, Tokisla theme). Hidden on phones;
+   the bottom nav is the mobile equivalent. The sidebar is a body-level
+   flex item: the 412px app column stays centered in the remaining space. */
+.side-bar{display:none}
+@media (min-width:720px){
+  /* No min-height condition here on purpose: on wide screens the feed
+     must never go full-window-width, even in a short window (the old
+     600px/780px frame rule alone left short windows unconstrained). */
+  body{display:flex;align-items:center;justify-content:flex-start;background:radial-gradient(circle at 50% 20%,#0b3d2b 0,#07070C 58%)}
+  .side-bar{display:flex;flex-direction:column;flex:none;width:240px;height:100dvh;padding:28px 16px 20px;color:#fff;overflow-y:auto;scrollbar-width:none}
+  .side-bar::-webkit-scrollbar{display:none}
+  .side-logo{display:flex;align-items:center;gap:10px;padding:6px 10px;margin:0 0 22px;width:100%;color:#fff;font-size:21px;font-weight:800;letter-spacing:.2px;text-align:start}
+  .side-logo img{width:34px;height:34px;border-radius:9px;flex:none}
+  .side-nav{display:flex;flex-direction:column;gap:2px}
+  .side-link{display:flex;align-items:center;gap:12px;padding:11px 12px;border-radius:12px;color:rgba(255,255,255,.88);font-size:16px;font-weight:600;text-align:start;width:100%}
+  .side-link:hover{background:rgba(255,255,255,.08);color:#fff}
+  .side-link.active{background:rgba(124,58,237,.28);color:#fff}
+  .side-link .ui-icon{width:24px;height:24px;flex:none}
+  .side-auth{margin-top:auto;padding-top:16px;border-top:1px solid rgba(255,255,255,.12)}
+  .side-auth .btn{width:100%}
+  .side-profile .side-avatar{width:42px;height:42px;border-radius:50%;object-fit:cover;flex:none}
+  .side-profile .side-who{min-width:0;text-align:start}
+  .side-profile b{display:block;font-size:14.5px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .side-profile small{display:block;font-size:12.5px;color:rgba(255,255,255,.65);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .app-shell{width:412px;height:min(892px,100dvh);flex:none;margin:0 auto;border-radius:36px;overflow:hidden;box-shadow:0 30px 80px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.16)}
+  .bottom-nav{display:none}
+  /* Overlays recenter on the free space beside the sidebar (240px). */
+  .sheet{left:calc(50% + 120px)}
+  .toast{left:calc(50% + 120px)}
+  .demo-badge{left:calc(50% + 120px)}
+  [dir="rtl"] .sheet{left:calc(50% - 120px)}
+  [dir="rtl"] .toast{left:calc(50% - 120px)}
+  [dir="rtl"] .demo-badge{left:calc(50% - 120px)}
+}
+
 .auth-card{position:relative}
 .auth-close{position:absolute;top:12px;right:12px;width:36px;height:36px;border-radius:50%;background:var(--emerald-soft);color:var(--emerald-dark);display:flex;align-items:center;justify-content:center;z-index:2}
 .auth-close .ui-icon{width:18px;height:18px}

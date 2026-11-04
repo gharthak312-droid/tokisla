@@ -75,6 +75,28 @@
   </div>
 </section>
 
+<!-- Desktop sidebar (TikTok-web shape, Tokisla routes only). Hidden below
+     the desktop breakpoint; the bottom nav is the mobile equivalent. -->
+<aside id="sideBar" class="side-bar" aria-label="Tokisla navigation">
+  <button class="side-logo" data-goto="home" aria-label="Tokisla home">
+    <img src="assets/branding/icon-192.png" alt="">
+    <span>Tokisla</span>
+  </button>
+  <nav class="side-nav">
+    <button id="sideSearch" class="side-link" type="button"><span data-icon="search"></span><span>Search</span></button>
+    <button id="sideForYou" class="side-link" type="button"><span data-icon="home"></span><span>For You</span></button>
+    <button id="sideExplore" class="side-link" type="button" data-goto="discover"><span data-icon="compass"></span><span>Explore</span></button>
+    <button id="sideFollowing" class="side-link" type="button"><span data-icon="users"></span><span>Following</span></button>
+    <button id="sideUpload" class="side-link" type="button" data-goto="create"><span data-icon="plus"></span><span>Upload</span></button>
+    <button id="sideProfile" class="side-link" type="button" data-goto="profile"><span data-icon="user"></span><span>Profile</span></button>
+    <button id="sideMore" class="side-link" type="button"><span data-icon="more"></span><span>More</span></button>
+  </nav>
+  <div class="side-auth">
+    <div id="sideLoggedOut"><button id="sideLoginBtn" class="btn btn-primary" type="button">Log in</button></div>
+    <button id="sideLoggedIn" class="side-link side-profile hidden" type="button" data-goto="profile"><span id="sideAvatar"></span><span class="side-who"><b id="sideName"></b><small id="sideHandle"></small></span></button>
+  </div>
+</aside>
+
 <!-- Main app shell -->
 <div id="appShell" class="app-shell hidden">
   <!-- Top bar (over feed) -->
