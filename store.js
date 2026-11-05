@@ -2311,6 +2311,14 @@
           await callApi("delete-video", { video_id: videoId });
         } catch (e) { throw asError(e); }
       },
+      async deleteVideo(me, videoId) {
+        /* Owner delete for a LIVE video: the api delete-video action
+         * owns the cascade and the owner-or-staff rule; the client
+         * only shows the option to the owner (moreMenu). */
+        try {
+          await callApi("delete-video", { video_id: videoId });
+        } catch (e) { throw asError(e); }
+      },
       async hashtagVideos(me, tag) {
         tag = String(tag || "").replace(/^#/, "").toLowerCase(); if (!tag) return [];
         /* Full-text search is word-based, not substring: the JS exact

@@ -924,7 +924,8 @@
       <button class="menu-row" id="mmDuet"><span class="menu-ico">${icon("users")}</span> Duet with this video</button>
       ${mine ? "" : `<button class="menu-row danger" id="mmReport"><span class="menu-ico">${icon("flag")}</span> Report this video</button>`}
       ${mine ? "" : `<button class="menu-row danger" id="mmBlock"><span class="menu-ico">${icon("ban")}</span> Block @${esc(v.username)}</button>`}
-      ${mine ? "" : `<button class="menu-row" id="mmHide"><span class="menu-ico">${icon("eyeOff")}</span> Not interested</button>`}`);
+      ${mine ? "" : `<button class="menu-row" id="mmHide"><span class="menu-ico">${icon("eyeOff")}</span> Not interested</button>`}
+      ${mine ? `<button class="menu-row danger" id="mmDelete"><span class="menu-ico">${icon("trash")}</span> Delete this video</button>` : ""}`);
     const bind = (id, fn) => { const el = $(id); if (el) el.addEventListener("click", fn); };
     bind("#mmCopy", () => { hideSheets(); copyLink(v); });
     bind("#mmDuet", () => { hideSheets(); if (needLogin()) return; startDuet(v); });
@@ -932,6 +933,14 @@
     bind("#mmReport", () => reportMenu("video", v.id));
     bind("#mmBlock", async () => { hideSheets(); if (needLogin()) return; await store.toggleBlock(me.id, v.creator_id); toast("Blocked. Their videos will no longer appear."); loadFeed(); });
     bind("#mmHide", () => { hideSheets(); slide.remove(); toast("Got it — showing less like this."); });
+    bind("#mmDelete", () => {
+      openActionSheet("Delete this video?", `<p style="line-height:1.55">This permanently deletes the video. This cannot be undone.</p>
+        <button class="btn btn-danger btn-block" id="confirmVideoDelete">Yes, delete this video</button>`);
+      $("#confirmVideoDelete").addEventListener("click", async () => {
+        try { await store.deleteVideo(me.id, v.id); hideSheets(); slide.remove(); toast("Video deleted."); }
+        catch (ex) { toast(ex.message); }
+      });
+    });
   }
 
   /* ------------------------------------------------------------ comments */
