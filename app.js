@@ -440,7 +440,7 @@
       // + tap opens the camera screen (or back to the edit/post step
       // when a video is already being made).
       if (typeof showCreateScreen === "function") showCreateScreen(uploadFile ? "edit" : "camera");
-    } else if (typeof stopCamera === "function") { stopCamera(); if (typeof stopSoundPreview === "function") stopSoundPreview(); if (typeof stopPreviewSound === "function") stopPreviewSound(); }
+    } else if (typeof stopCamera === "function") { stopCamera(); if (typeof stopSoundPreview === "function") stopSoundPreview(); if (typeof stopPreviewSound === "function") stopPreviewSound(); /* Stop the editor/post previews too — otherwise the edit video keeps playing (audio) in the background after leaving the create view for the feed, and never stops. */ const _epv = $("#editPreview"); if (_epv) { try { _epv.pause(); } catch (e) {} } const _ppv = $("#postPreviewVideo"); if (_ppv) { try { _ppv.pause(); } catch (e) {} } }
     if (view === "notifications") renderNotifications();
     if (view === "messages") renderConversations();
     if (view === "friends") renderFriends();
@@ -1510,7 +1510,7 @@
         $("#editMeta").textContent = f.name + " · " + uploadDuration.toFixed(1) + "s · " + (f.size / 1048576).toFixed(1) + " MB";
       }
       syncTrimUI();
-      captureThumb();
+      trimPickedVideo();
     };
     showCreateScreen("edit");
   }
@@ -2144,7 +2144,7 @@
         const stream = video.captureStream();
         if (!stream) return null;
         const origBps = duration > 0 ? Math.round((file.size / duration) * 8) : 1200000;
-        const videoBps = Math.max(400000, Math.min(2500000, Math.round(origBps * 0.9)));
+        const videoBps = Math.max(400000, Math.min(1800000, Math.round(origBps * 0.9)));
         try { console.info("[trim] mimeType:", mimeType || "(default)", "videoBps:", videoBps); } catch (_) {}
         const rec = mimeType
           ? new MediaRecorder(stream, { mimeType, videoBitsPerSecond: videoBps, audioBitsPerSecond: 128000 })
@@ -2184,6 +2184,58 @@
       }
     } catch (_) {
       return null;
+    }
+  }
+
+  /* ---- trim at pick: when a big video is picked from the gallery, cut
+   * it to the selected 20s range right there in the editor, so the file
+   * that uploads is already small (a single POST, like the small videos
+   * that upload fine on the phone). The preview then plays the trimmed
+   * file, so what he sees is exactly what will upload. The preview is
+   * paused while the trim runs (the trim's own video plays the audio,
+   * so there is no double sound). If trimming is unavailable, or the
+   * user picks another video / moves Crop while it runs, the original
+   * file is kept and the upload-time trim (doSubmit) retries. */
+  let pickTrimRunning = false;
+  async function trimPickedVideo() {
+    if (pickTrimRunning) return;
+    const f = uploadFile;
+    if (!f || DEMO) { captureThumb(); return; }
+    const fullDur = uploadDuration || 0;
+    const ts = uploadTrimStart || 0, te = uploadTrimEnd || fullDur;
+    const keep = te - ts;
+    if (!(keep > 0) || keep >= fullDur - 0.05) { captureThumb(); return; }
+    pickTrimRunning = true;
+    const metaEl = $("#editMeta");
+    const origMeta = metaEl ? metaEl.textContent : "";
+    const pv = $("#editPreview");
+    try { if (pv) pv.pause(); } catch (e) {}
+    try {
+      const trimmed = await trimVideoFile(f, ts, te, (p) => {
+        if (metaEl) metaEl.textContent = "Video kaat rahe hain… " + Math.round(p * 100) + "%";
+      });
+      if (!trimmed) { if (metaEl) metaEl.textContent = origMeta; captureThumb(); return; }
+      /* The user may have picked another video or moved Crop while the
+       * trim ran — discard it then (the upload-time trim handles the
+       * current range). Capture the thumbnail for the current file. */
+      if (uploadFile !== f || (uploadTrimStart || 0) !== ts || (uploadTrimEnd || fullDur) !== te) { captureThumb(); return; }
+      if (uploadBlobUrl) { try { URL.revokeObjectURL(uploadBlobUrl); } catch (e) {} }
+      uploadFile = trimmed;
+      uploadBlobUrl = URL.createObjectURL(trimmed);
+      uploadDuration = keep;
+      uploadTrimStart = 0;
+      uploadTrimEnd = keep;
+      if (pv) {
+        pv.src = uploadBlobUrl;
+        pv.onloadedmetadata = () => { syncTrimUI(); captureThumb(); };
+      }
+      if (metaEl) metaEl.textContent = trimmed.name + " · " + keep.toFixed(1) + "s · " + (trimmed.size / 1048576).toFixed(1) + " MB · trimmed";
+      syncTrimUI();
+    } catch (_) {
+      if (metaEl) metaEl.textContent = origMeta;
+      captureThumb();
+    } finally {
+      pickTrimRunning = false;
     }
   }
 
