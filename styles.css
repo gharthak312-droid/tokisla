@@ -419,6 +419,7 @@ body{background:#07070C}
 .edit-sound-clear{flex:none;width:44px;height:44px;background:var(--card);color:var(--ink);border:1px solid var(--line)}
 .edit-stage{position:relative;background:#000;border-radius:16px;overflow:hidden;aspect-ratio:9/16;max-height:430px;margin:0 auto;width:100%}
 .edit-preview{width:100%;height:100%;object-fit:cover}
+.edit-play-icon{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:64px;color:rgba(255,255,255,.9);text-shadow:0 2px 12px rgba(0,0,0,.5);pointer-events:none}
 .edit-text-overlay{position:absolute;left:10%;right:10%;top:20%;text-align:center;color:#fff;font-weight:800;font-size:20px;text-shadow:0 2px 8px rgba(0,0,0,.7);pointer-events:none;overflow-wrap:anywhere}
 .edit-rail{position:absolute;right:8px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:10px;z-index:3}
 .edit-tool{width:52px;height:52px;border-radius:50%;background:rgba(20,24,22,.55);color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(2px);cursor:pointer;border:1px solid rgba(255,255,255,.25)}

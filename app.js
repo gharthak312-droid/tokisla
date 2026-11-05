@@ -1522,6 +1522,7 @@
         } catch (err) { /* thumbnail is optional */ }
         pv.removeEventListener("seeked", onSeek);
         try { pv.currentTime = uploadTrimStart || 0; } catch (e) {}
+        playEditPreview();
       };
       pv.addEventListener("seeked", onSeek);
       pv.currentTime = seekTo;
@@ -1551,11 +1552,13 @@
     uploadTrimStart = Math.min(Number(e.target.value), (uploadTrimEnd || uploadDuration) - 0.5);
     if (uploadTrimStart < 0) uploadTrimStart = 0;
     syncTrimUI();
+    playEditPreview();
   });
   $("#trimEnd").addEventListener("input", (e) => {
     uploadTrimEnd = Math.max(Number(e.target.value), uploadTrimStart + 0.5);
     if (uploadTrimEnd > (uploadDuration || CFG.MAX_VIDEO_SECONDS)) uploadTrimEnd = uploadDuration || CFG.MAX_VIDEO_SECONDS;
     syncTrimUI();
+    playEditPreview();
   });
   $("#editTextInput").addEventListener("input", (e) => {
     uploadText = e.target.value;
@@ -1577,6 +1580,32 @@
   function pauseEditMedia() {
     const pv = $("#editPreview"); if (pv) { try { pv.pause(); } catch (e) {} }
     stopSoundPreview();
+  }
+  /* ---- edit preview playback: the picked video plays (with sound) so the
+   * user can see how it plays and what sound is on it before posting.
+   * Tap the preview to pause / play again. Without a library sound the
+   * video's own audio plays; with one, applyPreviewSound mutes the video
+   * and the sound audio plays in sync (bindPreviewSound). */
+  function playEditPreview() {
+    const pv = $("#editPreview");
+    if (!pv || !pv.src) return;
+    const end = uploadTrimEnd || uploadDuration || 0;
+    try {
+      if (pv.currentTime < (uploadTrimStart || 0) || (end && pv.currentTime >= end - 0.05)) pv.currentTime = uploadTrimStart || 0;
+    } catch (e) {}
+    pv.play().catch(() => {});
+  }
+  function toggleEditPreview() {
+    const pv = $("#editPreview");
+    if (!pv || !pv.src) return;
+    if (pv.paused) playEditPreview();
+    else { try { pv.pause(); } catch (e) {} }
+  }
+  const _epv = $("#editPreview");
+  if (_epv) {
+    _epv.addEventListener("play", () => { const ic = $("#editPlayIcon"); if (ic) ic.classList.add("hidden"); });
+    _epv.addEventListener("pause", () => { const ic = $("#editPlayIcon"); if (ic) ic.classList.remove("hidden"); });
+    _epv.addEventListener("click", toggleEditPreview);
   }
   function updateSoundLabel() {
     $("#editSoundLabel").textContent = uploadSound ? "Sound: " + uploadSound.title : "Add sound";
@@ -1792,14 +1821,31 @@
   $("#sheetBackdrop").addEventListener("click", stopSoundPreview);
 
   /* ---- post screen ---- */
+  function postTrimLoop() {
+    const pv = $("#postPreviewVideo");
+    const end = uploadTrimEnd || uploadDuration || 0;
+    if (end > uploadTrimStart && pv.currentTime >= end) { try { pv.currentTime = uploadTrimStart; } catch (e) {} }
+  }
+  function playPostPreview() {
+    const pv = $("#postPreviewVideo");
+    if (!pv || !pv.src) return;
+    const end = uploadTrimEnd || uploadDuration || 0;
+    try {
+      if (pv.currentTime < (uploadTrimStart || 0) || (end && pv.currentTime >= end - 0.05)) pv.currentTime = uploadTrimStart || 0;
+    } catch (e) {}
+    pv.play().catch(() => {});
+  }
   function syncPostScreen() {
     const pv = $("#postPreviewVideo");
     if (uploadBlobUrl) {
       pv.src = uploadBlobUrl;
       if (uploadThumb) pv.poster = uploadThumb;
       pv.style.filter = FILTER_CSS[uploadFilter] || "";
-      pv.play().catch(() => {});
+      pv.ontimeupdate = postTrimLoop;
       applyPreviewSound();
+      pv.onloadedmetadata = () => { playPostPreview(); };
+      if (pv.readyState >= 1) playPostPreview();
+      else pv.play().catch(() => {});
     }
     $("#disclosureState").textContent = uploadDisclosure ? "On" : "Off";
     $("#locationState").textContent = uploadLocation || "Add location";
@@ -1900,6 +1946,12 @@
     });
   });
   $("#postBackBtn").addEventListener("click", () => { const ppv = $("#postPreviewVideo"); if (ppv) { try { ppv.pause(); } catch (e) {} } showCreateScreen("edit"); });
+  $("#postPreviewVideo").addEventListener("click", () => {
+    const pv = $("#postPreviewVideo");
+    if (!pv || !pv.src) return;
+    if (pv.paused) playPostPreview();
+    else { try { pv.pause(); } catch (e) {} }
+  });
 
   /* ---- drafts ---- */
   /* A draft saved while the server is unreachable lives only in this
