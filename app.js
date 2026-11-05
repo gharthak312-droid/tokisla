@@ -1344,6 +1344,15 @@
       const el = n === "camera" ? $("#createCamera") : n === "edit" ? $("#createEdit") : n === "post" ? $("#createPost") : $("#createHome");
       if (el) el.classList.toggle("hidden", n !== name);
     });
+    /* Safety net: whenever we leave the edit screen (Next, Back, or any
+     * other path), the edit preview stops — it must never keep playing
+     * in the background. (The buttons already call pauseEditMedia; this
+     * covers every other route to another screen. Only the video element
+     * is paused here, so this is safe to run during initialisation.) */
+    if (name !== "edit") {
+      const _epv2 = $("#editPreview");
+      if (_epv2) { try { _epv2.pause(); } catch (e) {} }
+    }
     if (name === "camera") startCamera();
     else stopCamera();
     if (name === "home") renderMyVideos();
@@ -1843,9 +1852,13 @@
       pv.style.filter = FILTER_CSS[uploadFilter] || "";
       pv.ontimeupdate = postTrimLoop;
       applyPreviewSound();
-      pv.onloadedmetadata = () => { playPostPreview(); };
-      if (pv.readyState >= 1) playPostPreview();
-      else pv.play().catch(() => {});
+      try { pv.pause(); } catch (e) {}
+      /* No autoplay here: the edit video stops on Next, and the post
+       * preview stays paused until the user taps the thumbnail — so no
+       * video keeps playing in the background. Metadata seek only, so a
+       * tap starts it from the trim start. */
+      pv.onloadedmetadata = () => { try { pv.currentTime = uploadTrimStart || 0; } catch (e) {} };
+      if (pv.readyState >= 1) { try { pv.currentTime = uploadTrimStart || 0; } catch (e) {} }
     }
     $("#disclosureState").textContent = uploadDisclosure ? "On" : "Off";
     $("#locationState").textContent = uploadLocation || "Add location";
