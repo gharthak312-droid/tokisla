@@ -546,9 +546,15 @@
   /* ------------------------------------------------------------ feed */
   function pauseAllVideos() { $$("#feed video").forEach((v) => { try { v.pause(); } catch (e) {} }); }
   async function loadFeed() {
+    stopFeedSound();
     const feedEl = $("#feed");
     feedEl.innerHTML = '<div class="slide shimmer"></div>';
     const list = await store.feed(me ? me.id : null, feedKind).catch(() => []);
+    /* TikTok-style: a video with an attached sound plays THAT sound in the
+     * feed (the video itself stays muted). Resolve sound_id -> src once. */
+    const sounds = await store.listSounds().catch(() => []);
+    feedSoundMap = new Map((sounds || []).filter((s) => s && s.id && s.src).map((s) => [String(s.id), s.src]));
+    list.forEach((v) => { if (v.sound_id) v._soundSrc = feedSoundMap.get(String(v.sound_id)) || null; });
     feedEl.innerHTML = "";
     $("#feedEmpty").classList.toggle("hidden", list.length > 0);
     list.forEach((v) => feedEl.appendChild(slideEl(v)));
@@ -571,7 +577,31 @@
   function unlockSound() {
     if (soundUnlocked) return;
     soundUnlocked = true;
-    if (activeVid) { activeVid.muted = false; delete activeVid.dataset.autoMuted; }
+    if (activeVid) {
+      /* A video with an attached sound keeps its own audio muted — the
+       * sound IS its audio. Otherwise unmute the video itself. */
+      const hasSound = !!(activeSlide && activeSlide._soundSrc);
+      if (!hasSound) { activeVid.muted = false; delete activeVid.dataset.autoMuted; }
+      if (hasSound && feedSoundAudio && feedSoundVideoId) feedSoundAudio.play().catch(() => {});
+    }
+  }
+
+  /* ---- feed sound: TikTok-style, an attached sound plays in the feed
+   * while its video is on screen (video muted, sound synced to trim). */
+  let feedSoundAudio = null, feedSoundVideoId = null, activeSlide = null, feedSoundMap = new Map();
+  function stopFeedSound() {
+    if (feedSoundAudio) { try { feedSoundAudio.pause(); } catch (e) {} }
+    feedSoundVideoId = null;
+  }
+  function syncFeedSound(slide, vid) {
+    const src = slide && slide._soundSrc;
+    if (!src) { stopFeedSound(); return; }
+    try { vid.muted = true; } catch (e) {}
+    if (!feedSoundAudio) { feedSoundAudio = new Audio(); feedSoundAudio.loop = true; feedSoundAudio.preload = "auto"; }
+    if (feedSoundAudio.dataset.src !== src) { feedSoundAudio.src = src; feedSoundAudio.dataset.src = src; }
+    feedSoundVideoId = slide.dataset.id;
+    try { const off = Math.max(0, (vid.currentTime || 0) - (slide._trimStart || 0)); if (Math.abs((feedSoundAudio.currentTime || 0) - off) > 0.5) feedSoundAudio.currentTime = off; } catch (e) {}
+    if (soundUnlocked) feedSoundAudio.play().catch(() => {});
   }
   window.addEventListener("pointerdown", unlockSound);
   window.addEventListener("keydown", (e) => {
@@ -597,6 +627,8 @@
         if (en.intersectionRatio >= 0.6 && !document.hidden) {
           activeVid = en.target.querySelector("video.duet-main") || vids[0];
           vids.forEach((x) => { tryPlay(x); });
+          activeSlide = en.target;
+          syncFeedSound(en.target, activeVid);
           /* Prefetch: on a fast connection, let the visible clip — and
              the next one — buffer fully (preload auto) so playback does
              not keep stalling. On a slow connection, fetch only the next
@@ -616,7 +648,7 @@
            moment the user switches tabs. Owner order 2026-11-05: a
            playing video keeps playing in another tab/app. When the tab
            is visible again the observer re-fires with fresh ratios. */
-        else if (!document.hidden) { vids.forEach((x) => x.pause()); if (activeVid && en.target.contains(activeVid)) activeVid = null; }
+        else if (!document.hidden) { vids.forEach((x) => x.pause()); if (activeVid && en.target.contains(activeVid)) activeVid = null; if (feedSoundVideoId === en.target.dataset.id) stopFeedSound(); }
       });
     }, { root: $("#feed"), threshold: [0, 0.6, 1] });
     $$("#feed .slide").forEach((s) => observer.observe(s));
@@ -627,9 +659,25 @@
       .replace(/#([^\s#]+)/g, '<span class="tag-link" data-tag="$1">#$1</span>')
       .replace(/@([a-z0-9_.]+)/gi, '<span class="mention-link" data-mention="$1">@$1</span>');
   }
-  function scrollToVideo(id) {
+  function scrollToVideo(id, videoObj) {
     goto("home");
-    setTimeout(() => { const sl = $(`#feed .slide[data-id="${id}"]`); if (sl) sl.scrollIntoView(); else toast("Open the feed to watch."); }, 350);
+    setTimeout(() => {
+      const sl = $(`#feed .slide[data-id="${id}"]`);
+      if (sl) { sl.scrollIntoView(); return; }
+      /* Not in the loaded feed (e.g. a search result): put that video on
+       * top of the feed and open it, instead of the old "Open the feed
+       * to watch." dead end. */
+      if (videoObj) {
+        if (videoObj.sound_id && feedSoundMap && feedSoundMap.get(String(videoObj.sound_id))) videoObj._soundSrc = feedSoundMap.get(String(videoObj.sound_id));
+        const feedEl = $("#feed");
+        const slide = slideEl(videoObj);
+        feedEl.prepend(slide);
+        observeSlides();
+        slide.scrollIntoView();
+        return;
+      }
+      toast("Open the feed to watch.");
+    }, 350);
   }
   async function openHashtag(tag) {
     goto("discover");
@@ -645,7 +693,7 @@
       el.className = "list-item";
       el.innerHTML = `${v.thumbnail_path ? `<img class="thumb" src="${esc(sessionUploads[v.id] || v.thumbnail_path)}" alt="">` : ""}<div class="grow"><div class="t">${esc(v.caption || "Video")}</div><div class="s">@${esc(v.username || "")} · ${fmt(v.like_count)} likes</div></div>`;
       el.style.cursor = "pointer";
-      el.addEventListener("click", () => scrollToVideo(v.id));
+      el.addEventListener("click", () => scrollToVideo(v.id, v));
       box.appendChild(el);
     });
     if (!vids.length) box.innerHTML += '<p class="muted center" style="padding:14px">No videos with this hashtag yet.</p>';
@@ -677,7 +725,7 @@
       <div class="scrim"></div>
       <div class="play-state" aria-hidden="true"></div>
       <div class="rail">
-        <div class="rail-profile"><img class="avatar" data-act="profile" src="${esc(v.avatar_url || "")}" alt="" onerror="this.style.background='var(--emerald)';this.removeAttribute('src')"><button class="rail-follow" data-act="follow" aria-label="Follow creator">${icon("plus")}</button></div>
+        <div class="rail-profile">${v.avatar_url ? `<img class="avatar" data-act="profile" src="${esc(v.avatar_url)}" alt="">` : `<span class="avatar avatar-fallback" data-act="profile" style="display:inline-flex;align-items:center;justify-content:center;background:var(--emerald);color:#fff;font-weight:700">${esc(initials(v.display_name || v.username || "?"))}</span>`}<button class="rail-follow" data-act="follow" aria-label="Follow creator">${icon("plus")}</button></div>
         <button class="rail-btn" data-act="like"><span class="bubble">${icon("heart")}</span><span data-like-count>${fmt(v.like_count)}</span></button>
         <button class="rail-btn" data-act="comments"><span class="bubble">${icon("comment")}</span><span data-comment-count>${fmt(v.comment_count)}</span></button>
         <button class="rail-btn ${saved ? "saved" : ""}" data-act="save"><span class="bubble">${icon("bookmark")}</span><span>Save</span></button>
@@ -788,6 +836,14 @@
       prog.addEventListener("pointerup", () => { scrubbing = false; });
       prog.addEventListener("pointercancel", () => { scrubbing = false; });
     }
+    /* Attached sound (feed): keep the sound audio in step with the video —
+     * play/pause/seek all follow the video, offset by the trim start. */
+    slide._soundSrc = v._soundSrc || null;
+    slide._trimStart = trimStart || 0;
+    slide._trimLen = trimLen || 0;
+    vid.addEventListener("play", () => { if (feedSoundVideoId === v.id && soundUnlocked && feedSoundAudio) { try { feedSoundAudio.currentTime = Math.max(0, (vid.currentTime || 0) - (trimStart || 0)); } catch (e) {} feedSoundAudio.play().catch(() => {}); } });
+    vid.addEventListener("pause", () => { if (feedSoundVideoId === v.id && feedSoundAudio) { try { feedSoundAudio.pause(); } catch (e) {} } });
+    vid.addEventListener("seeked", () => { if (feedSoundVideoId === v.id && feedSoundAudio && !vid.paused) { try { feedSoundAudio.currentTime = Math.max(0, (vid.currentTime || 0) - (trimStart || 0)); } catch (e) {} } });
     let lastTap = 0;
     // Long-press the video -> the share popup (Share / Download / Copy link),
     // like TikTok. A long press must not also trigger the tap actions.
@@ -856,6 +912,18 @@
     });
     slide.querySelector('[data-act="more"]').addEventListener("click", () => moreMenu(v, slide));
     slide.querySelectorAll('[data-act="profile"]').forEach((el) => el.addEventListener("click", () => openProfile(v.creator_id)));
+    /* A broken avatar file (e.g. the old data-URL avatar) must fall back
+     * to initials instead of showing a broken-image glyph. */
+    const avImg = slide.querySelector(".rail-profile img.avatar");
+    if (avImg) avImg.addEventListener("error", () => {
+      const fb = document.createElement("span");
+      fb.className = "avatar avatar-fallback";
+      fb.setAttribute("data-act", "profile");
+      fb.style.cssText = "display:inline-flex;align-items:center;justify-content:center;background:var(--emerald);color:#fff;font-weight:700";
+      fb.textContent = initials(v.display_name || v.username || "?");
+      fb.addEventListener("click", () => openProfile(v.creator_id));
+      avImg.replaceWith(fb);
+    });
     const likeBtn = slide.querySelector('[data-act="like"]');
     if (liked) likeBtn.classList.add("liked");
     return slide;
@@ -1009,8 +1077,9 @@
         if (dlNote) { const dl = $("#shDownload"); if (dl) { const c = dl.cloneNode(true); c.style.opacity = ".55"; c.innerHTML = `<span class="share-ico">${icon("download")}</span><span>${dlNote}</span>`; dl.replaceWith(c); } }
       } catch (e) {}
     }
-    const people = await store.people(me ? me.id : null).catch(() => []);
     const row = $("#shareFriends"); if (!row) return;
+    if (!me) { row.innerHTML = '<p class="muted tiny">Log in to send videos to friends.</p>'; return; }
+    const people = await store.people(me.id).catch(() => []);
     row.innerHTML = people.length ? "" : '<p class="muted tiny">No friends yet.</p>';
     people.forEach((person) => {
       const b = document.createElement("button");
@@ -2368,7 +2437,7 @@
         : `${icon("play")} ${fmt(v.view_count || 0)}`;
       cell.innerHTML = `${v.thumbnail_path ? `<img src="${esc(sessionUploads[v.id] || v.thumbnail_path)}" alt="">` : ""}${isLockedTab ? `<span class="lock-badge">${icon("lock")}</span>` : ""}<span class="dur">${badge}</span>`;
       cell.style.cursor = "pointer";
-      cell.addEventListener("click", () => { goto("home"); setTimeout(() => { const s = $(`#feed .slide[data-id="${v.id}"]`); if (s) s.scrollIntoView(); else toast("Open the feed to watch."); }, 350); });
+      cell.addEventListener("click", () => scrollToVideo(v.id, v));
       grid.appendChild(cell);
     });
     if (mine) {
@@ -2600,6 +2669,7 @@
   }
 
   async function studioSheet() {
+    if (needLogin()) return;
     openActionSheet(t("set_studio"), '<p class="muted center" style="padding:18px">Loading your analytics…</p>');
     const [stats, trend] = await Promise.all([store.creatorStats(me.id).catch(() => null), store.trending().catch(() => [])]);
     if (!stats) { openActionSheet(t("set_studio"), '<p class="muted center" style="padding:18px">Analytics are not available right now.</p>'); return; }
@@ -2620,6 +2690,7 @@
   }
 
   async function activityCenterSheet() {
+    if (needLogin()) return;
     openActionSheet(t("set_activity"), `
       <div class="ac-chips">
         <button class="ac-chip active" data-ac="watch">Watch history</button>
