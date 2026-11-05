@@ -572,12 +572,15 @@
         if (en.intersectionRatio >= 0.6 && !document.hidden) {
           activeVid = en.target.querySelector("video.duet-main") || vids[0];
           vids.forEach((x) => { tryPlay(x); });
-          /* Prefetch: let the visible clip — and the next one — buffer
-             fully (preload auto) so playback does not keep stalling
-             while the file host's route catches up. */
+          /* Prefetch: on a fast connection, let the visible clip — and
+             the next one — buffer fully (preload auto) so playback does
+             not keep stalling. On a slow connection, fetch only the next
+             clip's metadata: a full prefetch would steal the bandwidth
+             the clip now playing needs. */
+          const slowNet = (() => { try { const c = navigator.connection; return !!(c && (c.saveData || /^(slow-2g|2g|3g)$/.test(c.effectiveType || ""))); } catch (e) { return false; } })();
           try { vids.forEach((x) => { x.preload = "auto"; }); } catch (e) {}
           const nextSlide = en.target.nextElementSibling;
-          if (nextSlide) { const nv = nextSlide.querySelector("video.duet-main") || nextSlide.querySelector("video"); if (nv) { try { if (!nv.getAttribute("src") && nv.dataset.src) nv.src = nv.dataset.src; nv.preload = "auto"; nv.load(); } catch (e) {} } }
+          if (nextSlide) { const nv = nextSlide.querySelector("video.duet-main") || nextSlide.querySelector("video"); if (nv) { try { if (!nv.getAttribute("src") && nv.dataset.src) nv.src = nv.dataset.src; if (slowNet) { nv.preload = "metadata"; } else { nv.preload = "auto"; nv.load(); } } catch (e) {} } }
           setTimeout(() => { if (activeVid && activeVid.paused) en.target._showPlayState?.("pause"); }, 400);
           const id = en.target.dataset.id;
           if (id && !countedViews.has(id)) { countedViews.add(id); store.recordView(id, me ? me.id : null).catch(() => {}); }
