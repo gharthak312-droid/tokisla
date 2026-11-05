@@ -77,6 +77,7 @@ const COL = {
   publicProfiles: "public_profiles",
   categories: "categories",
   videos: "videos",
+  videoViews: "video_views", // v33: one row per counted view (Console table; see increment-view)
   videoCategories: "video_categories",
   follows: "follows",
   videoLikes: "video_likes",
@@ -1081,6 +1082,18 @@ async function actionIncrementView(ctx, body) {
   }
   const next = (typeof video.view_count === "number" ? video.view_count : 0) + 1;
   const updated = await updateRow(db, ctx.cfg, COL.videos, videoId, { view_count: next });
+  /* Range analytics (v33): log one event per counted view so the admin
+   * panel can show views / top creators by Daily / Weekly / Monthly /
+   * Yearly / All time. Best-effort — the video_views table is created
+   * in Console; until then this throws (table missing) and is swallowed
+   * so view counting itself never breaks. The row $createdAt is the
+   * event time; admins-only read. */
+  try {
+    await createRow(db, ctx.cfg, COL.videoViews, ID.unique(), {
+      video_id: videoId,
+      creator_id: String(video.creator_id || ""),
+    }, [perm.readTeam()]);
+  } catch (_e) { /* table not created yet — counter above already counted */ }
   return { videoId, view_count: updated.view_count ?? next, counted: true };
 }
 
@@ -1602,6 +1615,163 @@ async function actionMyModeration(ctx, body) {
   };
 }
 
+/* Range analytics (v33): Daily / Weekly / Monthly / Yearly / All time.
+ * Views + Top creators per range come from video_views events (one row
+ * per counted view, written best-effort by increment-view; the table is
+ * created in Console — until then tracking is false and the ranged
+ * blocks show the note, while All time still uses the exact videos
+ * counter). New users come from profiles $createdAt, so history works
+ * for every range. Buckets are UTC days; "all" has no buckets, just a
+ * total. No $createdAt filter query is used (index lesson) — events are
+ * listed newest-first and filtered in code, stopping at the range start. */
+const RANGED_RANGES = ["daily", "weekly", "monthly", "yearly", "all"];
+function rangedSpans(range, now) {
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const d = (y, m, day) => new Date(Date.UTC(y, m, day));
+  const keyDay = (dt) => dt.toISOString().slice(0, 10);
+  if (range === "daily") {
+    const out = [];
+    for (let i = 6; i >= 0; i--) {
+      const day = d(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - i);
+      out.push({ key: keyDay(day), label: day.getUTCDate() + " " + months[day.getUTCMonth()], start: day, end: new Date(day.getTime() + 86400000) });
+    }
+    return out;
+  }
+  if (range === "weekly") {
+    const out = [];
+    const today = d(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    const dow = (today.getUTCDay() + 6) % 7; // Mon = 0
+    const monday = new Date(today.getTime() - dow * 86400000);
+    for (let i = 7; i >= 0; i--) {
+      const start = new Date(monday.getTime() - i * 7 * 86400000);
+      out.push({ key: keyDay(start), label: start.getUTCDate() + " " + months[start.getUTCMonth()], start, end: new Date(start.getTime() + 7 * 86400000) });
+    }
+    return out;
+  }
+  if (range === "monthly") {
+    const out = [];
+    for (let i = 11; i >= 0; i--) {
+      const m = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
+      const end = new Date(Date.UTC(m.getUTCFullYear(), m.getUTCMonth() + 1, 1));
+      out.push({ key: m.getUTCFullYear() + "-" + String(m.getUTCMonth() + 1).padStart(2, "0"), label: months[m.getUTCMonth()] + " " + String(m.getUTCFullYear()).slice(2), start: m, end });
+    }
+    return out;
+  }
+  if (range === "yearly") {
+    const out = [];
+    for (let i = 4; i >= 0; i--) {
+      const y = now.getUTCFullYear() - i;
+      out.push({ key: String(y), label: String(y), start: d(y, 0, 1), end: d(y + 1, 0, 1) });
+    }
+    return out;
+  }
+  return []; // "all" has no buckets
+}
+function rangedBucketIndex(spans, ts) {
+  for (let i = 0; i < spans.length; i++) {
+    if (ts >= spans[i].start.getTime() && ts < spans[i].end.getTime()) return i;
+  }
+  return -1;
+}
+async function listEventsSince(db, cfg, sinceISO) {
+  const rows = [];
+  let offset = 0;
+  for (let page = 0; page < 50; page++) {
+    const res = await db.listRows({
+      ...dbArgs(cfg, COL.videoViews),
+      queries: [Query.orderDesc("$createdAt"), Query.limit(100), Query.offset(offset)],
+    });
+    const batch = res.rows || res.documents || [];
+    let stop = false;
+    for (const r of batch) {
+      if ((r.$createdAt || "") < sinceISO) { stop = true; break; }
+      rows.push(r);
+    }
+    if (stop || batch.length < 100) break;
+    offset += batch.length;
+  }
+  return rows;
+}
+async function actionAdminAnalyticsRanged(ctx, body) {
+  const { db } = ctx;
+  const range = String(body.range || "daily");
+  if (!RANGED_RANGES.includes(range)) throw badRequest("range must be daily, weekly, monthly, yearly, or all.");
+  const now = new Date();
+  const spans = rangedSpans(range, now);
+  const buckets = spans.map((b) => ({ key: b.key, label: b.label, count: 0 }));
+
+  /* Views: All time uses the exact videos counter; other ranges count
+   * video_views events. */
+  let viewsTotal = 0;
+  let tracking = true;
+  let events = [];
+  let allVideos = null;
+  if (range === "all") {
+    allVideos = await listAll(db, ctx.cfg, COL.videos, [Query.orderDesc("view_count")]);
+    viewsTotal = allVideos.reduce((a, v) => a + (Number(v.view_count) || 0), 0);
+  } else {
+    try {
+      events = await listEventsSince(db, ctx.cfg, spans[0].start.toISOString());
+    } catch (_e) {
+      events = [];
+      tracking = false; // video_views table not created yet
+    }
+    for (const e of events) {
+      const ts = Date.parse(e.$createdAt || "");
+      if (!ts) continue;
+      const i = rangedBucketIndex(spans, ts);
+      if (i >= 0) buckets[i].count++;
+    }
+    viewsTotal = buckets.reduce((a, b) => a + b.count, 0);
+  }
+
+  /* Top creators: All time from the videos counter; other ranges from
+   * the same events grouped by creator. */
+  const byCreator = {};
+  if (range === "all") {
+    for (const v of allVideos || []) {
+      if (v.moderation_status !== "approved") continue;
+      const id = String(v.creator_id || "");
+      if (!id) continue;
+      byCreator[id] = (byCreator[id] || 0) + (Number(v.view_count) || 0);
+    }
+  } else {
+    for (const e of events) {
+      const id = String(e.creator_id || "");
+      if (!id) continue;
+      const ts = Date.parse(e.$createdAt || "");
+      if (!ts || rangedBucketIndex(spans, ts) < 0) continue;
+      byCreator[id] = (byCreator[id] || 0) + 1;
+    }
+  }
+  const topCreators = [];
+  for (const [userId, views] of Object.entries(byCreator).sort((a, b) => b[1] - a[1]).slice(0, 5)) {
+    const pub = await getRow(db, ctx.cfg, COL.publicProfiles, userId).catch(() => null);
+    topCreators.push({ userId, username: (pub && pub.username) || userId, views });
+  }
+
+  /* New users: profiles $createdAt — history works for every range. */
+  const profiles = await listAll(db, ctx.cfg, COL.profiles, [Query.orderDesc("$createdAt")]).catch(() => []);
+  const userBuckets = spans.map((b) => ({ key: b.key, label: b.label, count: 0 }));
+  let usersTotal = 0;
+  for (const p of profiles) {
+    const ts = Date.parse(p.$createdAt || "");
+    if (!ts) continue;
+    if (range === "all") { usersTotal++; continue; }
+    const i = rangedBucketIndex(spans, ts);
+    if (i >= 0) userBuckets[i].count++;
+  }
+  if (range === "all") usersTotal = profiles.length;
+  else usersTotal = userBuckets.reduce((a, b) => a + b.count, 0);
+
+  return {
+    range,
+    views: { buckets, total: viewsTotal, tracking },
+    topCreators,
+    newUsers: { buckets: userBuckets, total: usersTotal },
+  };
+}
+
 async function actionAdminStrikes(ctx, body) {
   const { db } = ctx;
   /* No event_type index — list all, filter here (see countStrikes). */
@@ -1895,6 +2065,7 @@ const HANDLERS = {
   "edit-video": { fn: actionEditVideo, auth: "signed-in" },
   "my-moderation": { fn: actionMyModeration, auth: "signed-in" },
   "admin-strikes": { fn: actionAdminStrikes, auth: "staff" },
+  "admin-analytics-ranged": { fn: actionAdminAnalyticsRanged, auth: "staff" },
   "repair-video-files": { fn: actionRepairVideoFiles, auth: "signed-in" },
   notify: { fn: actionNotify, auth: "signed-in" },
   "file-report": { fn: actionFileReport, auth: "signed-in" },

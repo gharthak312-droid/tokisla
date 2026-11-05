@@ -2542,6 +2542,16 @@
           return (r && r.data && r.data.counts) || {};
         } catch (e) { return {}; }
       },
+      /* Range analytics (v33): Daily / Weekly / Monthly / Yearly / All time.
+       * Returns { range, views: { buckets, total, tracking }, topCreators,
+       * newUsers: { buckets, total } } or null when the function is not
+       * live yet / the call fails. */
+      async adminAnalyticsRanged(range) {
+        try {
+          const r = await callApi("admin-analytics-ranged", { range });
+          return (r && r.data) || null;
+        } catch (e) { return null; }
+      },
       async editVideo(videoId, caption) {
         try {
           await callApi("edit-video", { video_id: videoId, caption });

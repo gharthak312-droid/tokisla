@@ -30,6 +30,14 @@
   .stat{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px}
   .stat .n{font-size:26px;font-weight:800;color:var(--emerald-dark)}
   .stat .l{font-size:12.5px;color:var(--muted);font-weight:600}
+  .ranges{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 10px}
+  .ranges button{padding:5px 12px;border:1px solid var(--line);border-radius:999px;background:#fff;font-size:12.5px;font-weight:700;color:var(--muted)}
+  .ranges button.on{background:var(--emerald);border-color:var(--emerald);color:#fff}
+  .bars{display:flex;align-items:flex-end;gap:6px;height:118px}
+  .bar{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;min-width:0}
+  .bar b{font-size:11.5px;margin-bottom:3px}
+  .bar i{display:block;width:100%;max-width:34px;background:var(--emerald);border-radius:4px 4px 0 0}
+  .bar span{font-size:10.5px;color:var(--muted);margin-top:5px;white-space:nowrap}
   .queue-item{display:grid;grid-template-columns:300px 1fr;gap:16px;background:#fff;border:1px solid var(--line);border-radius:16px;padding:14px;margin-bottom:14px}
   @media (max-width:720px){.queue-item{grid-template-columns:1fr}}
   .queue-item video{width:100%;max-height:380px;border-radius:12px;background:#000}
@@ -97,6 +105,9 @@
       <div class="card" style="margin-top:14px">
         <h3 style="margin:0 0 6px">Live analytics <span class="small" style="color:#0a7d4f">● LIVE</span> <span id="analyticsUpdated" class="small muted" style="font-weight:400"></span></h3>
         <div class="stats" id="analyticsStats"></div>
+        <div id="viewsRange" style="margin-top:16px"></div>
+        <div id="creatorsRange" style="margin-top:16px"></div>
+        <div id="usersRange" style="margin-top:16px"></div>
         <div id="topVideos" style="margin-top:10px"></div>
         <p class="muted small" style="margin:8px 0 0">Naya view / like / comment aate hi numbers foran badal jate hain; har 30 second me bhi khud taza hota hai.</p>
       </div>
@@ -459,7 +470,94 @@
     wireVideoRowButtons($("#topVideos"), a.top);
     const upd = $("#analyticsUpdated");
     if (upd) upd.textContent = "· aakhri update: " + new Date().toLocaleTimeString();
+    renderViewsRange(); renderCreatorsRange(); renderUsersRange();
   }
+
+  /* ---- Range analytics (v33): Daily / Weekly / Monthly / Yearly / All time,
+   * in all three blocks. Each block has its own range buttons; the range
+   * survives the 30s auto-refresh (rangedState). ---- */
+  const RANGED = [["daily", "Daily"], ["weekly", "Weekly"], ["monthly", "Monthly"], ["yearly", "Yearly"], ["all", "All time"]];
+  const rangedState = { views: "daily", creators: "all", users: "daily" };
+  function rangeButtons(current, block) {
+    return '<div class="ranges">' + RANGED.map(([v, l]) =>
+      '<button type="button" data-range="' + v + '" data-block="' + block + '"' + (v === current ? ' class="on"' : '') + '>' + l + '</button>').join("") + '</div>';
+  }
+  function barChart(buckets) {
+    const max = Math.max(1, ...buckets.map((b) => b.count));
+    return '<div class="bars">' + buckets.map((b) => {
+      const h = b.count ? Math.max(3, Math.round((b.count / max) * 76)) : 0;
+      return '<div class="bar"><b>' + b.count + '</b><i style="height:' + h + 'px"></i><span>' + b.label + '</span></div>';
+    }).join("") + '</div>';
+  }
+  function rangeHead(title, block, range) {
+    return '<h4 style="margin:0 0 8px">' + title + '</h4>' + rangeButtons(range, block);
+  }
+  async function renderViewsRange() {
+    const box = $("#viewsRange"); if (!box) return;
+    const range = rangedState.views;
+    if (!box.querySelector(".ranges")) box.innerHTML = rangeHead("Views", "views", range) + '<p class="muted small">Loading…</p>';
+    const a = await store.adminAnalyticsRanged(range).catch(() => null);
+    if (!a || !a.views) {
+      box.innerHTML = rangeHead("Views", "views", range) + '<p class="muted small">Analytics abhi load nahi hua — panel dobara kholo (function update ho raha ho to aik minute ruk jao).</p>';
+      return;
+    }
+    let html = rangeHead("Views", "views", range);
+    if (range === "all") {
+      html += '<div class="stat" style="display:inline-block;min-width:170px"><div class="n">' + a.views.total + '</div><div class="l">Total views — all time</div></div>';
+    } else if (!a.views.tracking) {
+      html += '<p class="muted small">Views ki range wali ginti abhi shuru nahi hui — video_views table Console me bante hi har view ka din save hoga, phir ye graph bharna shuru hoga. All time total upar dikh raha hai.</p>';
+    } else {
+      html += barChart(a.views.buckets) + '<p class="muted small" style="margin:8px 0 0">Total is range me: <b>' + a.views.total + '</b></p>';
+    }
+    box.innerHTML = html;
+  }
+  async function renderCreatorsRange() {
+    const box = $("#creatorsRange"); if (!box) return;
+    const range = rangedState.creators;
+    if (!box.querySelector(".ranges")) box.innerHTML = rangeHead("Top creators", "creators", range) + '<p class="muted small">Loading…</p>';
+    const a = await store.adminAnalyticsRanged(range).catch(() => null);
+    if (!a || !a.topCreators) {
+      box.innerHTML = rangeHead("Top creators", "creators", range) + '<p class="muted small">Analytics abhi load nahi hua — panel dobara kholo.</p>';
+      return;
+    }
+    let html = rangeHead("Top creators", "creators", range);
+    if (!a.topCreators.length) {
+      html += range === "all"
+        ? '<p class="muted small">Abhi koi approved video nahi hai.</p>'
+        : '<p class="muted small">Is range me abhi koi view nahi — views ki range wali ginti video_views table bante hi shuru hogi (All time par dekho, wahan data hai).</p>';
+    } else {
+      html += '<div>' + a.topCreators.map((c, i) =>
+        '<div class="row-item"><b style="width:22px">' + (i + 1) + '.</b><span class="grow"><b>@' + esc(c.username) + '</b></span><span class="muted small">' + c.views + ' views</span></div>').join("") + '</div>';
+    }
+    box.innerHTML = html;
+  }
+  async function renderUsersRange() {
+    const box = $("#usersRange"); if (!box) return;
+    const range = rangedState.users;
+    if (!box.querySelector(".ranges")) box.innerHTML = rangeHead("New users", "users", range) + '<p class="muted small">Loading…</p>';
+    const a = await store.adminAnalyticsRanged(range).catch(() => null);
+    if (!a || !a.newUsers) {
+      box.innerHTML = rangeHead("New users", "users", range) + '<p class="muted small">Analytics abhi load nahi hua — panel dobara kholo.</p>';
+      return;
+    }
+    let html = rangeHead("New users", "users", range);
+    if (range === "all") {
+      html += '<div class="stat" style="display:inline-block;min-width:170px"><div class="n">' + a.newUsers.total + '</div><div class="l">Total users — all time</div></div>';
+    } else {
+      html += barChart(a.newUsers.buckets) + '<p class="muted small" style="margin:8px 0 0">Total is range me: <b>' + a.newUsers.total + '</b></p>';
+    }
+    box.innerHTML = html;
+  }
+  document.addEventListener("click", (e) => {
+    const btn = e.target && e.target.closest ? e.target.closest("button[data-range]") : null;
+    if (!btn) return;
+    const block = btn.dataset.block, range = btn.dataset.range;
+    if (!rangedState[block] || rangedState[block] === range) return;
+    rangedState[block] = range;
+    if (block === "views") renderViewsRange();
+    else if (block === "creators") renderCreatorsRange();
+    else if (block === "users") renderUsersRange();
+  });
 
   async function renderQueue() {
     const list = await store.adminQueue().catch(() => []);
