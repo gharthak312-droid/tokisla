@@ -2788,13 +2788,11 @@
   const GUIDELINES = `<p><b>Welcome to Tokisla.</b> We keep this a positive, family-friendly place:</p>
     <ul style="line-height:1.55;padding-left:18px">
       <li>Videos are max <b>20 seconds</b>.</li>
-      <li><b>No music or songs</b> in videos. Voice, recitation, nasheed-style vocals without instruments as per community standards, and natural sounds are welcome.</li>
       <li>No inappropriate, explicit or suggestive content.</li>
       <li>No abuse, harassment, hate or personal attacks.</li>
       <li>No spam, scams, misleading or dangerous content.</li>
       <li>No impersonation of other people or organisations.</li>
       <li>Respect Islam, the Quran, the Prophet ﷺ, all Prophets, scholars and every religion — no disrespect or mockery.</li>
-      <li>No women appear in videos, and nothing haram — no music, no songs, no instruments.</li>
       <li>Posts go live immediately. Videos that break these rules are removed when reported, and strikes apply: repeated violations can lead to removal, restricted features, suspension or a permanent ban.</li>
     </ul><p class="muted">Breaking the rules can lead to removal, restricted features, suspension or a permanent ban. You may appeal any decision from the app.</p>`;
   const RULES = `<p><b>Tokisla Rules.</b> Tokisla is a platform: videos are posted by users and go live immediately. The following content is restricted and will be removed:</p>

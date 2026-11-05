@@ -365,7 +365,7 @@
         S.profiles.push(prof);
         S.users.push({ id: prof.id, email, password: String(password), profile_id: prof.id });
         const chair = S.profiles.find((x) => x.username === "chairman.wadood");
-        if (chair) S.messages.push({ id: uid(), sender_id: chair.id, recipient_id: prof.id, body: "Assalamu alaikum! Welcome to Tokisla. Posts go live immediately. Videos that break the rules (music, women, haram content) are removed when reported, and strikes apply.", is_read: false, created_at: now() });
+        if (chair) S.messages.push({ id: uid(), sender_id: chair.id, recipient_id: prof.id, body: "Assalamu alaikum! Welcome to Tokisla. Posts go live immediately. Videos that break the rules are removed when reported, and strikes apply.", is_read: false, created_at: now() });
         S.session = prof.id; save();
         return prof;
       },
