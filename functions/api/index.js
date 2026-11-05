@@ -1220,11 +1220,15 @@ async function actionSetCommentPin(ctx, body) {
 // restored (approved) — the admin's restore clears it. 3 strikes =
 // the account is suspended automatically.
 async function countStrikes(db, cfg, creatorId) {
-  const events = await listAll(db, cfg, COL.moderationEvents, [Query.equal("event_type", "needs_review"), Query.limit(100)]);
+  /* moderation_events has no index on event_type, so the whole (small)
+   * table is listed and filtered here — an unfiltered list needs no
+   * index, a Query.equal("event_type", …) would fail. */
+  const events = await listAll(db, cfg, COL.moderationEvents, [Query.limit(100)]);
   const videoCache = new Map();
   let strikes = 0;
   const out = [];
   for (const e of events) {
+    if (e.event_type !== "needs_review") continue;
     let d = null;
     try { d = JSON.parse(e.details || "{}"); } catch (_err) { d = null; }
     if (!d || String(d.creator_id || "") !== String(creatorId)) continue;
@@ -1579,9 +1583,11 @@ async function actionMyModeration(ctx, body) {
   const profile = await getRow(db, ctx.cfg, COL.profiles, callerId);
   const { strikes, events } = await countStrikes(db, ctx.cfg, callerId);
   // Direct admin deletions (event_type "deleted") so the app can
-  // explain a removal that never went through Restricted.
-  const deleted = await listAll(db, ctx.cfg, COL.moderationEvents, [Query.equal("event_type", "deleted"), Query.limit(100)]);
+  // explain a removal that never went through Restricted. Same
+  // no-index note as countStrikes: list all, filter here.
+  const deleted = await listAll(db, ctx.cfg, COL.moderationEvents, [Query.limit(100)]);
   for (const e of deleted) {
+    if (e.event_type !== "deleted") continue;
     let d = null;
     try { d = JSON.parse(e.details || "{}"); } catch (_err) { d = null; }
     if (d && String(d.creator_id || "") === String(callerId)) {
@@ -1598,9 +1604,11 @@ async function actionMyModeration(ctx, body) {
 
 async function actionAdminStrikes(ctx, body) {
   const { db } = ctx;
-  const events = await listAll(db, ctx.cfg, COL.moderationEvents, [Query.equal("event_type", "needs_review"), Query.limit(100)]);
+  /* No event_type index — list all, filter here (see countStrikes). */
+  const events = await listAll(db, ctx.cfg, COL.moderationEvents, [Query.limit(100)]);
   const creators = new Set();
   for (const e of events) {
+    if (e.event_type !== "needs_review") continue;
     let d = null;
     try { d = JSON.parse(e.details || "{}"); } catch (_err) { d = null; }
     if (d && d.creator_id) creators.add(String(d.creator_id));
