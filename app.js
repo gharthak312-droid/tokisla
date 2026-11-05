@@ -2036,6 +2036,92 @@
     const m = String(ex.message || "");
     return /failed to fetch/i.test(m) || (ex.name === "TypeError" && /networkerror|load failed|network request failed/i.test(m));
   }
+  /* Real trim (v34): cut the picked file to the selected range BEFORE
+   * upload, so the stored file is only the posted seconds (small upload,
+   * reliable on slow connections). It plays the file in an offscreen
+   * video element and records its output with MediaRecorder from
+   * trimStart to trimEnd (real-time, at most 20s). Output format is
+   * probed on the device: mp4 first (same as the original — the bucket
+   * accepts it), then webm. The bitrate follows the original file so
+   * the trimmed file stays small. The video plays with sound (the Post
+   * tap is a fresh user gesture, so playback is allowed) because a
+   * muted element records a silent audio track. Any failure (no
+   * MediaRecorder / no supported type / play or record error) returns
+   * null and the caller uploads the original file instead — posting
+   * never breaks because trimming failed. */
+  async function trimVideoFile(file, start, end, onProgress) {
+    try {
+      if (typeof MediaRecorder === "undefined" || typeof document === "undefined") return null;
+      const video = document.createElement("video");
+      video.playsInline = true;
+      video.preload = "auto";
+      const url = URL.createObjectURL(file);
+      video.src = url;
+      try {
+        await new Promise((res, rej) => {
+          video.onloadedmetadata = res;
+          video.onerror = () => rej(new Error("load"));
+          setTimeout(() => rej(new Error("load timeout")), 15000);
+        });
+        const duration = video.duration || 0;
+        const s = Math.max(0, Math.min(start || 0, duration));
+        const e = Math.max(s, Math.min(end || duration, duration));
+        if (!(e - s > 0.5) || (e - s) >= duration - 0.05) return null; // nothing to cut
+        const candidates = [
+          "video/mp4;codecs=avc1.42E01E,mp4a.40.2", "video/mp4",
+          "video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm",
+        ];
+        let mimeType = "";
+        for (const c of candidates) {
+          try { if (MediaRecorder.isTypeSupported(c)) { mimeType = c; break; } } catch (_) {}
+        }
+        if (typeof video.captureStream !== "function") return null;
+        const stream = video.captureStream();
+        if (!stream) return null;
+        const origBps = duration > 0 ? Math.round((file.size / duration) * 8) : 1200000;
+        const videoBps = Math.max(400000, Math.min(2500000, Math.round(origBps * 0.9)));
+        try { console.info("[trim] mimeType:", mimeType || "(default)", "videoBps:", videoBps); } catch (_) {}
+        const rec = mimeType
+          ? new MediaRecorder(stream, { mimeType, videoBitsPerSecond: videoBps, audioBitsPerSecond: 128000 })
+          : new MediaRecorder(stream, { videoBitsPerSecond: videoBps, audioBitsPerSecond: 128000 });
+        const chunks = [];
+        rec.ondataavailable = (ev) => { if (ev.data && ev.data.size) chunks.push(ev.data); };
+        const stopped = new Promise((res) => { rec.onstop = res; });
+        video.currentTime = s;
+        await new Promise((res, rej) => {
+          video.onseeked = res;
+          video.onerror = () => rej(new Error("seek"));
+          setTimeout(() => rej(new Error("seek timeout")), 10000);
+        });
+        const playP = video.play();
+        if (playP && playP.catch) await playP.catch(() => { throw new Error("play blocked"); });
+        rec.start(250);
+        await new Promise((res) => {
+          const onTime = () => {
+            try { if (typeof onProgress === "function") onProgress(Math.min(1, Math.max(0, (video.currentTime - s) / (e - s)))); } catch (_) {}
+            if (video.currentTime >= e - 0.05 || video.ended) { video.removeEventListener("timeupdate", onTime); res(); }
+          };
+          video.addEventListener("timeupdate", onTime);
+          video.onended = () => { video.removeEventListener("timeupdate", onTime); res(); };
+          setTimeout(() => { video.removeEventListener("timeupdate", onTime); res(); }, (e - s + 5) * 1000);
+        });
+        try { video.pause(); } catch (_) {}
+        if (rec.state !== "inactive") rec.stop();
+        await stopped;
+        const blob = new Blob(chunks, { type: rec.mimeType || mimeType || "video/mp4" });
+        if (!blob || blob.size < 1000) return null;
+        const ext = /webm/i.test(blob.type) ? "webm" : "mp4";
+        const base = (file.name || "video.mp4").replace(/\.[^.]+$/, "");
+        return new File([blob], base + "-trim." + ext, { type: blob.type });
+      } finally {
+        try { video.pause(); video.removeAttribute("src"); video.load(); } catch (_) {}
+        URL.revokeObjectURL(url);
+      }
+    } catch (_) {
+      return null;
+    }
+  }
+
   async function doSubmit(isDraft, opts) {
     if (needLogin()) return null;
     if (!uploadFile || !uploadDuration) { toast("Choose or record a video first."); return null; }
@@ -2066,6 +2152,35 @@
       if (SOUND_CATS.some(([slug]) => slug === uploadSound.category)) meta.sound_category = uploadSound.category;
     }
     const msgEl = $("#postMsg");
+    /* Real trim (v34): cut the file to the selected range BEFORE upload,
+     * so the stored file is only the posted seconds. Only when the kept
+     * part is shorter than the whole file; the trimmed file replaces
+     * uploadFile for this submit and the meta is updated (trim 0 → kept
+     * seconds, size = trimmed size). If trimming returns null (not
+     * supported / failed), the original file uploads exactly as before.
+     * Skipped for DEMO (no real bytes there). Wrapped so a trim error
+     * can never break the post itself. */
+    try {
+      const fullDur = uploadDuration || 0;
+      const trimLen = (uploadTrimEnd || fullDur) - (uploadTrimStart || 0);
+      if (!DEMO && uploadFile && fullDur > 0 && trimLen > 0 && trimLen < fullDur - 0.05) {
+        if (msgEl) { msgEl.textContent = "Video kaat rahe hain… 0%"; msgEl.style.color = ""; }
+        const trimmed = await trimVideoFile(uploadFile, uploadTrimStart || 0, uploadTrimEnd || fullDur, (p) => {
+          if (msgEl) msgEl.textContent = "Video kaat rahe hain… " + Math.round(p * 100) + "%";
+        });
+        if (trimmed && trimmed.size > 0 && trimmed.size < uploadFile.size) {
+          uploadFile = trimmed;
+          const td = Math.round(trimLen * 100) / 100;
+          meta.duration_seconds = td;
+          meta.size_bytes = trimmed.size;
+          meta.trim_start_seconds = 0;
+          meta.trim_end_seconds = td;
+          if (msgEl) msgEl.textContent = "Video kaat di — ab upload ho rahi hai…";
+        } else if (msgEl) {
+          msgEl.textContent = "";
+        }
+      }
+    } catch (_) { /* trim must never break the post — original file uploads */ }
     try {
       let created;
       if (DEMO) {
