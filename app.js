@@ -1263,9 +1263,19 @@
     renderSearchResults([], [], [], null);
   }
   let searchTimer = null;
+  /* TikTok-style search page: while the user is searching, the results
+   * sit right under the search bar (top of the page) and the browse
+   * sections (trending hashtags, categories) are hidden — the results
+   * no longer sit at the very bottom under "Creators". Clearing the
+   * search brings the browse sections back. */
+  function setDiscoverBrowseVisible(show) {
+    const b = $("#discoverBrowse"); if (b) b.classList.toggle("hidden", !show);
+    if (!show) { const v = $("#view-discover"); if (v) { try { v.scrollTop = 0; } catch (e) {} } try { window.scrollTo(0, 0); } catch (e) {} }
+  }
   $("#searchInput").addEventListener("input", (e) => {
     clearTimeout(searchTimer);
     const q = e.target.value;
+    setDiscoverBrowseVisible(!q.trim());
     searchTimer = setTimeout(async () => {
       if (!q.trim()) { renderSearchResults([], [], [], null); return; }
       const r = await store.search(me ? me.id : null, q).catch(() => ({ users: [], videos: [] }));
@@ -1276,6 +1286,7 @@
   async function renderSearchResults(users, videos, cats, onlyCat) {
     const box = $("#searchResults"); box.innerHTML = "";
     if (onlyCat) {
+      setDiscoverBrowseVisible(false);
       const all = await store.feed(me ? me.id : null, "foryou");
       videos = all.filter((v) => (v.category_ids || []).includes(onlyCat.id));
       box.innerHTML = `<div class="list-item"><div class="grow"><div class="t">${esc(onlyCat.name)}</div><div class="s">${videos.length} video(s)</div></div></div>`;

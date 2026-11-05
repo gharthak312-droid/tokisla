@@ -2175,7 +2175,17 @@
           listMapped("public_profiles", [Q.search("username", q), Q.limit(20)], mapRow).catch(() => []),
           loadPublicVideos({ queries: [Q.search("caption", q)], limit: 20, viewerId: me || null }).catch(() => []),
         ]);
-        return { users, videos };
+        /* Fallback for accounts: if the fulltext search finds nobody
+         * (index missing, or the query is a partial name like "wadood"),
+         * list the public profiles and match by substring on username /
+         * display name, so creators still show up. */
+        let finalUsers = users || [];
+        if (!finalUsers.length) {
+          const all = await listMapped("public_profiles", [Q.limit(50)], mapRow).catch(() => []);
+          const needle = q.toLowerCase();
+          finalUsers = (all || []).filter((u) => (u.username || "").toLowerCase().includes(needle) || (u.display_name || "").toLowerCase().includes(needle));
+        }
+        return { users: finalUsers, videos };
       },
       /* --- sounds library (catalog + user-added + original sounds) ---
        * Live contract (to be backed by the `sounds` table + media bucket
