@@ -2027,10 +2027,19 @@
         let thumbFileId = m.thumbnailFileId || m.thumbnail_file_id || (isBareFileId(m.thumbnail_path) ? String(m.thumbnail_path).trim() : null) || null;
         let thumbPath = m.thumbnail_path || "";
         try {
-          /* Owner-only permissions here on purpose (spec §0: a user can
-           * only grant a permission they hold — team:admins grants are
-           * rejected for non-members). create-upload flips the file to
-           * the full template server-side with the API key. */
+          /* File grants: a public-bound post's files MUST be readable
+           * by anyone from birth. <video>/<img> tags send no auth
+           * header, and the session cookie is third-party from GitHub
+           * Pages, so an owner-only file is unplayable for everyone
+           * (black frame, 401) even though the row is live — the
+           * server flip is only a backstop. Private (only-me) posts
+           * stay owner-only. (Spec §0 still holds: no team:admins
+           * grants — the user cannot grant a permission they do not
+           * hold; read("any") is grantable by the file owner.) */
+          const fileIsPublic = m.is_draft !== true && m.isDraft !== true && (m.visibility || "public") !== "private";
+          const filePerms = fileIsPublic
+            ? [readAny(), readUser(me), updateUser(me), deleteUser(me)]
+            : [readUser(me), updateUser(me), deleteUser(me)];
           if (!fileId && m.file && storage && typeof storage.createFile === "function") {
             let upFile = m.file;
             /* The SDK only sends real File objects as file parts (a
@@ -2039,7 +2048,7 @@
              * files with a plain message instead of the endpoint's. */
             if (typeof File !== "undefined" && !(upFile instanceof File)) { try { upFile = new File([upFile], (m.filename || "video.mp4"), { type: m.content_type || upFile.type || "video/mp4" }); } catch (e) {} }
             if (!upFile || !upFile.size) throw new Error("This video file is empty (0 bytes) — please choose the video again.");
-            const upArgs = { bucketId: MEDIA_BUCKET, fileId: ID.unique(), file: upFile, permissions: [readUser(me), updateUser(me), deleteUser(me)] };
+            const upArgs = { bucketId: MEDIA_BUCKET, fileId: ID.unique(), file: upFile, permissions: filePerms };
             if (typeof m.onProgress === "function") upArgs.onProgress = (ev) => { try { m.onProgress(ev && typeof ev.progress === "number" ? ev.progress : 0); } catch (e) {} };
             const uploaded = await storage.createFile(upArgs);
             fileId = (uploaded && (uploaded.$id || uploaded.id)) || null;
@@ -2047,7 +2056,7 @@
           if (!thumbFileId && typeof thumbPath === "string" && thumbPath.indexOf("data:") === 0) {
             const blob = dataUrlToBlob(thumbPath);
             if (blob && blob.size > 0 && storage && typeof storage.createFile === "function") {
-              const uploadedThumb = await storage.createFile({ bucketId: MEDIA_BUCKET, fileId: ID.unique(), file: toFile(blob, "thumbnail.jpg"), permissions: [readUser(me), updateUser(me), deleteUser(me)] });
+              const uploadedThumb = await storage.createFile({ bucketId: MEDIA_BUCKET, fileId: ID.unique(), file: toFile(blob, "thumbnail.jpg"), permissions: filePerms });
               thumbFileId = (uploadedThumb && (uploadedThumb.$id || uploadedThumb.id)) || null;
             }
           }

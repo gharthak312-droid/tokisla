@@ -502,21 +502,33 @@ async function deleteOrphanIfOwned(storage, fileId, callerId, logFn) {
 // filePermissions template, which is identical to the standalone
 // one (same permission set for the same publicRead value).
 async function normalizeFilePermissions(storage, fileId, ownerId, { publicRead }, logFn) {
-  if (!isFileId(fileId)) return;
-  try {
-    const file = await storage.getFile({ bucketId: MEDIA_BUCKET, fileId });
-    await storage.updateFile({
-      bucketId: MEDIA_BUCKET,
-      fileId,
-      name: file.name,
-      permissions: filePermissions(ownerId, { publicRead }),
-    });
-  } catch (e) {
-    // Safe direction: the file keeps whatever permissions the client
-    // upload gave it (owner-only), so a live public video whose flip
-    // failed stays unplayable rather than leaking. Log and continue.
-    logFn(`create-upload: file permission normalisation failed for ${fileId}: ${e && e.message ? e.message : e}`);
+  if (!isFileId(fileId)) return true;
+  const wanted = filePermissions(ownerId, { publicRead });
+  const hasReadAny = (perms) => (perms || []).some((p) => p === 'read("any")' || p === "read(any)" || p === "any");
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const file = await storage.getFile({ bucketId: MEDIA_BUCKET, fileId });
+      await storage.updateFile({
+        bucketId: MEDIA_BUCKET,
+        fileId,
+        name: file.name,
+        permissions: wanted,
+      });
+      // Verify: a silent flip failure leaves a live video unplayable
+      // (black frame, 401) with no trace. Read back and retry once.
+      const after = await storage.getFile({ bucketId: MEDIA_BUCKET, fileId });
+      if (!publicRead || hasReadAny(after.$permissions || [])) return true;
+      logFn(`create-upload: file permission flip did not stick for ${fileId} (attempt ${attempt}); retrying.`);
+    } catch (e) {
+      // Safe direction: the file keeps whatever permissions the client
+      // upload gave it (owner-only), so a live public video whose flip
+      // failed stays unplayable rather than leaking. Log and retry
+      // once, then give up loudly.
+      logFn(`create-upload: file permission normalisation failed for ${fileId} (attempt ${attempt}): ${e && e.message ? e.message : e}`);
+    }
   }
+  logFn(`WARNING: create-upload: file ${fileId} could not be flipped to ${publicRead ? "public" : "owner-only"} read after 2 attempts; it may be unplayable.`);
+  return false;
 }
 
 // Standalone `deleteFileBestEffort` kept inline (delete-account
@@ -736,7 +748,11 @@ async function actionCreateUpload(ctx, body) {
     // publish-draft flips it live.
     const nowIso = new Date().toISOString();
     const liveStatus = isDraft ? "draft" : "approved";
-    const publicRead = liveStatus === "approved" && visibility === "public";
+    // Followers-visibility files must be readable too: <video>/<img>
+    // tags send no auth header, so an owner-only file is unplayable
+    // for followers as well. Only "private" (only-me) stays
+    // owner-only; the visibility field still gates listing.
+    const publicRead = liveStatus === "approved" && visibility !== "private";
     // thumbnail_path: a file id when the thumbnail was uploaded as a
     // file; a short data URL / external URL verbatim when it fits the
     // 2048-char attribute; otherwise null. Slicing a data URL would
@@ -833,6 +849,44 @@ async function actionCreateUpload(ctx, body) {
     }
     throw e;
   }
+}
+
+// One-time repair for videos whose files stayed owner-only (black
+// frame / 401 for everyone while the row is live): re-applies the
+// file template to the video + thumbnail and reports the file's
+// permissions afterwards, so a broken flip is visible instead of
+// silent. Owner-only, or staff for any video. No client UI: run
+// from Console execution with the caller's JWT header, body
+// {"action":"repair-video-files","videoId":"<row id>"} or
+// {"action":"repair-video-files","fileId":"<storage file id>"}.
+async function actionRepairVideoFiles(ctx, body) {
+  const { db, storage, callerId, isStaff } = ctx;
+  const videoId = typeof body.videoId === "string" && body.videoId.trim() ? body.videoId.trim()
+    : typeof body.video_id === "string" && body.video_id.trim() ? body.video_id.trim()
+    : typeof body.id === "string" && body.id.trim() ? body.id.trim() : "";
+  const fileIdArg = typeof body.fileId === "string" && body.fileId.trim() ? body.fileId.trim()
+    : typeof body.file_id === "string" && body.file_id.trim() ? body.file_id.trim() : "";
+  let video = null;
+  if (videoId) {
+    video = await getRow(db, ctx.cfg, COL.videos, videoId);
+  } else if (fileIdArg) {
+    const found = await listAll(db, ctx.cfg, COL.videos, [Query.equal("storage_path", fileIdArg)]);
+    video = found && found.length ? found[0] : null;
+  } else {
+    throw badRequest("videoId or fileId is required.");
+  }
+  if (!video) throw notFound("Video not found.");
+  if (!isStaff && String(video.creator_id) !== String(callerId)) {
+    throw forbidden("Only the owner or a moderator can repair this video.");
+  }
+  const publicRead = video.moderation_status === "approved" && video.visibility !== "private";
+  const videoOk = await normalizeFilePermissions(storage, video.storage_path, String(video.creator_id), { publicRead }, ctx.logFn);
+  let thumbOk = true;
+  if (isFileId(video.thumbnail_path)) thumbOk = await normalizeFilePermissions(storage, video.thumbnail_path, String(video.creator_id), { publicRead }, ctx.logFn);
+  const after = isFileId(video.storage_path)
+    ? await storage.getFile({ bucketId: MEDIA_BUCKET, fileId: video.storage_path }).catch(() => null)
+    : null;
+  return { videoId: video.$id, publicRead, repaired: videoOk && thumbOk, filePermissions: after ? after.$permissions || [] : [] };
 }
 
 async function actionDeleteAccount(ctx, body) {
@@ -1689,6 +1743,7 @@ const HANDLERS = {
   unsuspend: { fn: (ctx, body) => actionSuspendUser(ctx, body, { suspend: false }), auth: "admin" },
   "set-role": { fn: actionSetRole, auth: "admin" },
   "delete-video": { fn: actionDeleteVideo, auth: "signed-in" },
+  "repair-video-files": { fn: actionRepairVideoFiles, auth: "signed-in" },
   notify: { fn: actionNotify, auth: "signed-in" },
   "file-report": { fn: actionFileReport, auth: "signed-in" },
   "send-message": { fn: actionSendMessage, auth: "signed-in" },
@@ -1739,7 +1794,7 @@ export default async ({ req, res, log, error: logError }) => {
     } else if (handler.auth === "admin") {
       await requireTeam(teams, callerId, { adminOnly: true });
       isStaff = true;
-    } else if (handler.auth === "signed-in" && action === "delete-video") {
+    } else if (handler.auth === "signed-in" && (action === "delete-video" || action === "repair-video-files")) {
       // delete-video allows owners as well as staff; resolve staff
       // status without failing so the handler can apply the
       // owner-or-staff rule itself.
