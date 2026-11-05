@@ -412,7 +412,7 @@
 
   /* ------------------------------------------------------------ navigation */
   let currentView = "home";
-  function goto(view) {
+  function goto(view, profileUserId) {
     currentView = view;
     $$(".view").forEach((v) => v.classList.add("hidden"));
     $("#view-" + view).classList.remove("hidden");
@@ -434,7 +434,7 @@
     if (view === "notifications") renderNotifications();
     if (view === "messages") renderConversations();
     if (view === "friends") renderFriends();
-    if (view === "profile") renderProfile(me ? me.id : null);
+    if (view === "profile") renderProfile(profileUserId || (me ? me.id : null));
   }
   $$("[data-goto]").forEach((b) => b.addEventListener("click", () => {
     const v = b.dataset.goto;
@@ -2148,8 +2148,17 @@
 
   /* ------------------------------------------------------------ profile */
   let profileTab = "videos";
-  async function openProfile(userId) { if (!me && !userId) { needLogin(); return; } goto("profile"); renderProfile(userId || me.id); }
+  async function openProfile(userId) {
+    if (!me && !userId) { needLogin(); return; }
+    /* One render only, for the requested user: goto("profile") used to
+     * render MY profile first and then renderProfile(userId) raced it —
+     * whichever finished last won, so tapping a friend usually landed
+     * back on my own account. */
+    goto("profile", userId || (me ? me.id : null));
+  }
+  let profileRenderSeq = 0;
   async function renderProfile(userId) {
+    const seq = ++profileRenderSeq;
     const box = $("#profileBox");
     if (!userId) {
       box.innerHTML = `<div class="guest-profile">
@@ -2164,9 +2173,11 @@
       return;
     }
     const p = await store.getProfile(userId).catch(() => null);
+    if (seq !== profileRenderSeq) return;
     if (!p) { box.innerHTML = '<p class="muted center" style="padding:30px">Profile not found.</p>'; return; }
     const counts = await store.socialCounts(userId);
     const likesTotal = await store.totalLikesReceived(userId).catch(() => 0);
+    if (seq !== profileRenderSeq) return;
     const mine = me && me.id === userId;
     const following = me && !mine ? await store.isFollowing(me.id, userId) : false;
     box.innerHTML = `
@@ -2199,6 +2210,7 @@
       : mine && profileTab === "liked" ? await store.likedVideos(me.id)
       : mine && profileTab === "locked" ? await store.myPrivateVideos(me.id)
       : await store.profileVideos(userId, me ? me.id : null);
+    if (seq !== profileRenderSeq) return;
     const emptyText = profileTab === "liked" ? "Videos you like will appear here." : profileTab === "saved" ? "Saved videos will appear here." : profileTab === "locked" ? "Private videos you keep for yourself will appear here. Only you can see them." : "No videos yet.";
     grid.innerHTML = vids.length ? "" : `<p class="muted center" style="grid-column:1/-1;padding:22px">${!mine && p.private_account && !following && profileTab === "videos" ? "This account is private. Follow them to see their videos." : emptyText}</p>`;
     vids.forEach((v) => {
