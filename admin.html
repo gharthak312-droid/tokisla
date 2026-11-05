@@ -408,14 +408,16 @@
     }));
   }
   /* Thumbnails: tap an image to play the video in place; tap a video
-   * to pause / resume. The playing video opens ENLARGED (220px) with
-   * its own controls — at 96px the player's 3-dot menu slid off the
-   * left edge of the screen and its text was cut off; at 220px the
-   * menu opens fully on-screen. One delegated listener for every list. */
+   * to pause / resume. The playing video opens in PORTRAIT (160x284,
+   * 9:16 — the video's own shape), tall and narrow, not a wide box
+   * that takes over the row. Wide enough that the player's own 3-dot
+   * menu still opens on-screen instead of sliding off the left edge.
+   * One delegated listener for every list. */
   function enlargeThumbVideo(vid) {
-    vid.style.width = "220px";
-    vid.style.maxHeight = "320px";
+    vid.style.width = "160px";
+    vid.style.maxHeight = "284px";
     vid.style.height = "auto";
+    vid.style.objectFit = "contain";
   }
   document.addEventListener("click", (e) => {
     const img = e.target && e.target.closest ? e.target.closest("img.vthumb[data-play]") : null;

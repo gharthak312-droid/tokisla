@@ -1,9 +1,7 @@
 /* Tokisla service worker — caches the app shell so the PWA opens fast and
    works on flaky connections. Video files and API calls are never cached. */
-/* v31 = v30 redeploy: the v30 Pages deploy failed because the 596b8ebf
- * deploy was still in progress (GitHub allows one Pages deployment at
- * a time); same admin.html fix, cache name bumped to force a fresh deploy. */
-const CACHE = "tokisla-shell-v31";
+/* v32: playing video opens in portrait (160x284) instead of a wide 220px box. */
+const CACHE = "tokisla-shell-v32";
 const SHELL = [
   "./", "./index.html", "./styles.css", "./config.js", "./store.js", "./app.js",
   "./manifest.webmanifest", "./assets/branding/icon-192.png", "./assets/branding/icon-512.png",
