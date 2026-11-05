@@ -2254,12 +2254,17 @@
     if (!me) return;
     if (!file.type || file.type.indexOf("image/") !== 0) { toast("Please choose an image."); return; }
     try {
-      let url = await readFileDataUrl(file);
+      /* Upload the photo as a real file and save its short URL. The old
+       * code saved the photo itself as a data URL in avatar_url — Appwrite
+       * rejects avatar_url longer than 2048 chars, so every photo save
+       * failed with "Invalid document structure". */
+      let blob = file;
       if (file.size > 400 * 1024) {
-        const small = await shrinkImage(url, 256);
-        if (small) url = small;
+        const small = await shrinkImage(await readFileDataUrl(file), 256);
+        if (small) blob = await (await fetch(small)).blob();
         else if (file.size > 2 * 1024 * 1024) { toast("Photo is too large — please choose a smaller one."); return; }
       }
+      const url = await store.uploadAvatar(me.id, blob);
       me = await store.updateProfile(me.id, { avatar_url: url });
       store.logEvent(me.id, "Profile photo updated", "");
       toast("Profile photo updated.");

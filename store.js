@@ -1574,6 +1574,20 @@
           throw new Error((e.code === 409 || /unique|duplicate|already exists/i.test(msg)) ? "That username is taken." : msg);
         }
       },
+      async uploadAvatar(userId, blob) {
+        /* Avatars are public files: upload the image and return its short
+         * view URL. A data URL must never be saved as avatar_url — Appwrite
+         * rejects avatar_url longer than 2048 chars, and even a shrunk
+         * 256x256 JPEG data URL is ~15-25 KB. */
+        const file = toFile(blob, "avatar.jpg");
+        const uploaded = await storage.createFile({
+          bucketId: MEDIA_BUCKET,
+          fileId: ID.unique(),
+          file,
+          permissions: [readAny(), readUser(userId), updateUser(userId), deleteUser(userId)],
+        });
+        return fileViewUrl(uploaded.$id);
+      },
       async setPreferences(me, categoryIds) {
         /* Category IDs are numbers in the UI and slugs in the database
          * (spec J4). Translate at this boundary in both directions. */
