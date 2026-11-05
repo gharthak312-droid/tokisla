@@ -1,6 +1,6 @@
 /* Tokisla service worker — caches the app shell so the PWA opens fast and
    works on flaky connections. Video files and API calls are never cached. */
-const CACHE = "tokisla-shell-v19";
+const CACHE = "tokisla-shell-v20";
 const SHELL = [
   "./", "./index.html", "./styles.css", "./config.js", "./store.js", "./app.js",
   "./manifest.webmanifest", "./assets/branding/icon-192.png", "./assets/branding/icon-512.png",

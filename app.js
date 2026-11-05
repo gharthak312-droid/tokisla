@@ -699,12 +699,27 @@
       else { try { vid.currentTime = 0; vid.play().catch(() => {}); } catch (e) {} }
     });
     // Trim (Crop) from the edit screen: keep playback inside the trimmed
-    // range when the video carries one.
+    // range when the video carries one. At the trim end the video ENDS
+    // (pauses on the last frame, triangle shows; auto-scroll advances)
+    // instead of looping back to the start.
     const trimStart = Number(v.trim_start_seconds) || 0;
     const trimEnd = Number(v.trim_end_seconds) || 0;
-    if (trimEnd > trimStart) {
+    const trimLen = trimEnd - trimStart;
+    if (trimLen > 0) {
       vid.addEventListener("loadedmetadata", () => { try { if (vid.currentTime < trimStart || vid.currentTime >= trimEnd) vid.currentTime = trimStart; } catch (e) {} });
-      vid.addEventListener("timeupdate", () => { try { if (vid.currentTime >= trimEnd) vid.currentTime = trimStart; } catch (e) {} });
+      vid.addEventListener("play", () => { try { if (vid.currentTime >= trimEnd - 0.05) vid.currentTime = trimStart; } catch (e) {} });
+      vid.addEventListener("timeupdate", () => {
+        try {
+          if (vid.paused || vid.currentTime < trimEnd) return;
+          vid.pause();
+          vid.currentTime = trimEnd;
+          if (autoScrollOn() && vid === activeVid && atFeedRoot()) {
+            const next = slide.nextElementSibling;
+            if (next && next.classList.contains("slide")) next.scrollIntoView({ behavior: "smooth", block: "start" });
+            else { try { vid.currentTime = trimStart; vid.play().catch(() => {}); } catch (e) {} }
+          }
+        } catch (e) {}
+      });
     }
     const duetVid = slide.querySelector("video.duet-src");
     if (duetVid) {
@@ -719,7 +734,11 @@
     if (dpEl) dpEl.addEventListener("click", () => openProfile(duet.creator_id));
     const roEl = slide.querySelector('[data-act="reply-open"]');
     if (roEl) roEl.addEventListener("click", () => scrollToVideo(v.reply_video_id));
-    vid.addEventListener("timeupdate", () => { if (vid.duration) bar.style.width = (vid.currentTime / vid.duration * 100) + "%"; });
+    vid.addEventListener("timeupdate", () => {
+      if (!vid.duration) return;
+      if (trimLen > 0) bar.style.width = (Math.min(1, Math.max(0, (vid.currentTime - trimStart) / trimLen)) * 100) + "%";
+      else bar.style.width = (vid.currentTime / vid.duration * 100) + "%";
+    });
     let lastTap = 0;
     // Long-press the video -> the share popup (Share / Download / Copy link),
     // like TikTok. A long press must not also trigger the tap actions.
