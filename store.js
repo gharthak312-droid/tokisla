@@ -2481,6 +2481,8 @@
       async adminAnalytics() {
         const vids = await listMapped("videos", [Q.orderDesc("view_count"), Q.limit(100)], mapVideo).catch(() => []);
         const approved = vids.filter((v) => v.moderation_status === "approved");
+        const profById = await getPublicProfiles(approved.map((v) => v.creator_id));
+        approved.forEach((v) => { const p = profById[v.creator_id]; if (p) v.username = p.username; });
         const sum = (k) => approved.reduce((a, v) => a + (Number(v[k]) || 0), 0);
         return {
           totalViews: sum("view_count"),

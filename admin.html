@@ -73,16 +73,10 @@
       <div id="loginError" class="err hidden"></div>
       <button class="btn btn-primary" style="width:100%" type="submit">Sign in</button>
     </form>
-    <div style="margin:14px 0 10px;text-align:center" class="muted small">— ya —</div>
-    <div class="field"><label>Aarzi default password (filhal ke liye)</label><input id="defaultPassword" type="password" autocomplete="off" placeholder="Default password"></div>
-    <div id="defaultError" class="err hidden"></div>
-    <button class="btn btn-ghost" id="defaultEnterBtn" style="width:100%" type="button">Default password se kholo</button>
-    <p class="muted small" style="margin:10px 0 0;line-height:1.5">Ye aarzi rasta hai: password is page ke code me likha hai, is liye ye sirf dekhne ke liye hai. Buttons (approve / remove waghera) asal admin account ke baghair nahi chalenge. Asal security andar se lagayenge.</p>
   </div>
 
   <!-- Panel -->
   <div id="panel" class="hidden">
-    <div id="tempBanner" class="hidden" style="background:#fdf3d7;border:1px solid #e7cf8a;border-radius:10px;padding:10px 12px;font-size:13px;margin-bottom:12px"><b>Aarzi entry:</b> default password se khula hai — sirf dekhne ke liye. Buttons asal admin account ke baghair nahi chalenge.</div>
     <div class="tabs">
       <button class="tab active" data-tab="dashboard">Dashboard</button>
       <button class="tab" data-tab="queue">Moderation Queue <span id="queueCount"></span></button>
@@ -182,13 +176,6 @@
   let analyticsTimer = null;
   let liveUnsub = null;
   let liveTimer = null;
-  /* AARZI default password (owner ka faisla 2026-11-05): admin panel
-   * filhal is se khulta hai, kyunke asal account ka password bhool
-   * gaya hai aur profile par admin role nahi laga. Ye password is
-   * page ke code me public hai — asal security (apna account + admin
-   * role) lagte hi is block ko HATA DENA hai. */
-  const DEFAULT_ADMIN_PASSWORD = "tokisla123";
-  const DEFAULT_ME = { id: "default-admin", username: "admin", role: "aarzi admin" };
   const REASONS = ["Contains music", "Inappropriate content", "Spam or misleading", "Abuse or harassment", "Religious disrespect", "Low quality / unclear", "Other"];
 
   function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.remove("hidden"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.add("hidden"), 2600); }
@@ -198,11 +185,6 @@
     if (DEMO) { $("#modeBadge").classList.remove("hidden"); $("#demoCreds").classList.remove("hidden"); await store.ensureDemoAdmin(); }
     me = await store.currentUser().catch(() => null);
     if (me && (me.role === "admin" || me.role === "moderator")) enterPanel();
-    else if (!me) {
-      try {
-        if (sessionStorage.getItem("tokisla-default-admin") === "1") { me = DEFAULT_ME; enterPanel(true); }
-      } catch (e) { /* storage unavailable: password har dafa mangna hoga */ }
-    }
   }
   $("#loginForm").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -216,24 +198,15 @@
       me = p; enterPanel();
     } catch (ex) { err.textContent = ex.message || "Sign-in failed."; err.classList.remove("hidden"); }
   });
-  $("#defaultEnterBtn").addEventListener("click", () => {
-    const err = $("#defaultError"); err.classList.add("hidden");
-    if ($("#defaultPassword").value === DEFAULT_ADMIN_PASSWORD) {
-      try { sessionStorage.setItem("tokisla-default-admin", "1"); } catch (e) {}
-      me = DEFAULT_ME; enterPanel(true);
-    } else { err.textContent = "Ghalat password."; err.classList.remove("hidden"); }
-  });
   $("#logoutBtn").addEventListener("click", async () => {
-    try { sessionStorage.removeItem("tokisla-default-admin"); } catch (e) {}
     try { await store.logOut(); } catch (e) { /* no session: nothing to close */ }
     location.reload();
   });
 
-  function enterPanel(temp) {
+  function enterPanel() {
     $("#loginCard").classList.add("hidden");
     $("#panel").classList.remove("hidden");
     $("#logoutBtn").classList.remove("hidden");
-    $("#tempBanner").classList.toggle("hidden", !temp);
     $("#adminName").textContent = "@" + me.username + " (" + me.role + ")";
     refreshAll();
     if (analyticsTimer) clearInterval(analyticsTimer);
@@ -390,8 +363,14 @@
       ["Total comments", a.totalComments], ["Approved videos", a.videos],
     ].map(([l, n]) => `<div class="stat"><div class="n">${n}</div><div class="l">${l}</div></div>`).join("");
     $("#topVideos").innerHTML = a.top.length
-      ? '<h4 style="margin:0 0 8px">Sab videos — views ke hisab se (' + a.top.length + ')</h4>' + a.top.map((v) => `<div class="row-item"><div class="grow"><div style="font-weight:600">${esc(v.caption || "Untitled")}</div><div class="small muted">@${esc(v.username || v.creator_id)} · ${v.view_count || 0} views · ${v.like_count || 0} likes · ${v.comment_count || 0} comments</div></div></div>`).join("")
+      ? '<h4 style="margin:0 0 8px">Sab videos — views ke hisab se (' + a.top.length + ')</h4>' + a.top.map((v) => `<div class="row-item"><div class="grow"><div style="font-weight:600">${esc(v.caption || "Untitled")}</div><div class="small muted">@${esc(v.username || v.creator_id)} · ${v.view_count || 0} views · ${v.like_count || 0} likes · ${v.comment_count || 0} comments</div></div><button class="btn btn-danger" data-del-video="${esc(v.id)}" style="height:37px">Delete</button></div>`).join("")
       : '<p class="muted" style="margin:0">Abhi koi approved video nahi hai.</p>';
+    $$("#topVideos [data-del-video]").forEach((b) => b.addEventListener("click", async () => {
+      const vid = b.dataset.delVideo;
+      if (!vid || !confirm("Ye video hamesha ke liye delete kar dein?")) return;
+      try { await store.deleteVideo(me.id, vid); toast("Video deleted."); refreshAll(); }
+      catch (ex) { toast(ex.message || "Delete nahi hui."); }
+    }));
     const upd = $("#analyticsUpdated");
     if (upd) upd.textContent = "· aakhri update: " + new Date().toLocaleTimeString();
   }
@@ -453,6 +432,7 @@
         <div class="small muted">Target: ${esc(String(r.target_id).slice(0, 18))} · ${ago(r.created_at)}</div></div>
         <span class="status open">open</span>
         ${isSound ? '<button class="btn btn-danger" data-remove-sound style="height:37px">Remove sound</button>' : ""}
+        ${!isSound && r.target_type === "video" ? '<button class="btn btn-danger" data-remove-video style="height:37px">Remove video</button>' : ""}
         <button class="btn btn-ghost" data-act="reviewed" style="height:37px">Mark reviewed</button>
         <button class="btn btn-ghost" data-act="dismissed" style="height:37px">Dismiss</button>`;
       const rm = el.querySelector("[data-remove-sound]");
@@ -461,6 +441,15 @@
           await store.deleteSound(me.id, r.target_id);
           await store.adminSetReportStatus(r.id, "reviewed");
           toast("Sound removed."); refreshAll();
+        } catch (ex) { toast(ex.message); }
+      });
+      const rmv = el.querySelector("[data-remove-video]");
+      if (rmv) rmv.addEventListener("click", async () => {
+        if (!confirm("Ye video hamesha ke liye delete kar dein?")) return;
+        try {
+          await store.deleteVideo(me.id, r.target_id);
+          await store.adminSetReportStatus(r.id, "reviewed");
+          toast("Video removed."); refreshAll();
         } catch (ex) { toast(ex.message); }
       });
       el.querySelectorAll("[data-act]").forEach((b) => b.addEventListener("click", async () => {
