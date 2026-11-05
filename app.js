@@ -284,7 +284,7 @@
     $("#authScreen").classList.add("hidden");
     $("#appShell").classList.remove("hidden");
     renderSidebarAuth();
-    goto("home");
+    goto("home", null, { clearStack: true });
     refreshNotifDot();
   }
 
@@ -412,7 +412,17 @@
 
   /* ------------------------------------------------------------ navigation */
   let currentView = "home";
-  function goto(view, profileUserId) {
+  /* Back stack: Android Back steps through screens one at a time
+   * (Post -> Edit -> Camera -> Home), TikTok-style, instead of jumping
+   * straight out of the app. opts.clearStack wipes the stack (used
+   * after a post or a login, where going back makes no sense). */
+  let backStack = [], restoringBack = false;
+  function goto(view, profileUserId, opts) {
+    if (opts && opts.clearStack) backStack.length = 0;
+    else if (!restoringBack && view !== currentView) {
+      backStack.push({ view: currentView, create: (typeof createScreen !== "undefined" ? createScreen : null) });
+      if (backStack.length > 30) backStack.shift();
+    }
     currentView = view;
     $$(".view").forEach((v) => v.classList.add("hidden"));
     $("#view-" + view).classList.remove("hidden");
@@ -430,7 +440,7 @@
       // + tap opens the camera screen (or back to the edit/post step
       // when a video is already being made).
       if (typeof showCreateScreen === "function") showCreateScreen(uploadFile ? "edit" : "camera");
-    } else if (typeof stopCamera === "function") { stopCamera(); if (typeof stopSoundPreview === "function") stopSoundPreview(); }
+    } else if (typeof stopCamera === "function") { stopCamera(); if (typeof stopSoundPreview === "function") stopSoundPreview(); if (typeof stopPreviewSound === "function") stopPreviewSound(); }
     if (view === "notifications") renderNotifications();
     if (view === "messages") renderConversations();
     if (view === "friends") renderFriends();
@@ -477,7 +487,22 @@
     if (currentView === "messages" && !$("#threadPanel").classList.contains("hidden")) { closeThread(); return; }
     if (!$("#authScreen").classList.contains("hidden")) { continueAsGuest(); return; }
     if (!$("#onboardingScreen").classList.contains("hidden")) { enterApp(); return; }
+    if (backStack.length) {
+      const prev = backStack.pop();
+      restoringBack = true;
+      try {
+        if (prev.view === "create") { goto("create"); showCreateScreen(prev.create || "home"); }
+        else goto(prev.view);
+      } finally { restoringBack = false; }
+      return;
+    }
     if (currentView !== "home") { goto("home"); return; }
+    /* Home with nowhere to go back to: TikTok-style double-back to
+     * exit. First press shows the hint and re-arms the sentinel after
+     * 2s; a second press inside the window finds no history entry, so
+     * the shell exits instead of showing the hint again. */
+    toast("Press back again to exit.");
+    setTimeout(() => { pushSentinel(); }, 2000);
   }
   window.addEventListener("popstate", () => {
     sentinelActive = false;
@@ -742,6 +767,27 @@
       if (trimLen > 0) bar.style.width = (Math.min(1, Math.max(0, (vid.currentTime - trimStart) / trimLen)) * 100) + "%";
       else bar.style.width = (vid.currentTime / vid.duration * 100) + "%";
     });
+    /* Seekable progress bar (TikTok-style): tap or drag the bar to jump
+     * forward or back in the video. Respects the trim range on trimmed
+     * videos. The bar sits above the video element, so taps here never
+     * trigger the play/pause toggle. */
+    const prog = slide.querySelector(".progress");
+    if (prog) {
+      const seekTo = (ev) => {
+        try {
+          const r = prog.getBoundingClientRect();
+          const x = Math.min(1, Math.max(0, ((ev.clientX || 0) - r.left) / Math.max(1, r.width)));
+          const dur = trimLen > 0 ? trimLen : (vid.duration || 0);
+          if (!dur) return;
+          vid.currentTime = Math.min((trimLen > 0 ? trimStart : 0) + dur - 0.05, Math.max(trimLen > 0 ? trimStart : 0, (trimLen > 0 ? trimStart : 0) + x * dur));
+        } catch (e) {}
+      };
+      let scrubbing = false;
+      prog.addEventListener("pointerdown", (ev) => { ev.stopPropagation(); scrubbing = true; try { prog.setPointerCapture(ev.pointerId); } catch (e) {} seekTo(ev); });
+      prog.addEventListener("pointermove", (ev) => { if (scrubbing) seekTo(ev); });
+      prog.addEventListener("pointerup", () => { scrubbing = false; });
+      prog.addEventListener("pointercancel", () => { scrubbing = false; });
+    }
     let lastTap = 0;
     // Long-press the video -> the share popup (Share / Download / Copy link),
     // like TikTok. A long press must not also trigger the tap actions.
@@ -770,19 +816,43 @@
     slide.querySelector('[data-act="like"]').addEventListener("click", () => doLike(v, slide, false));
     slide.querySelector('[data-act="follow"]').addEventListener("click", async (e) => {
       if (needLogin()) return;
-      const on = await store.toggleFollow(me.id, v.creator_id);
+      const was = e.currentTarget.classList.contains("following");
+      const on = !was;
+      // Optimistic: the check appears at once; revert only on failure.
       e.currentTarget.classList.toggle("following", on);
       e.currentTarget.innerHTML = icon(on ? "check" : "plus");
-      toast(on ? "Following @" + v.username : "Unfollowed @" + v.username);
+      try {
+        const serverOn = await store.toggleFollow(me.id, v.creator_id);
+        if (serverOn !== on) {
+          e.currentTarget.classList.toggle("following", serverOn);
+          e.currentTarget.innerHTML = icon(serverOn ? "check" : "plus");
+        } else toast(on ? "Following @" + v.username : "Unfollowed @" + v.username);
+      } catch (err) {
+        e.currentTarget.classList.toggle("following", was);
+        e.currentTarget.innerHTML = icon(was ? "check" : "plus");
+        toast(err.message);
+      }
     });
     slide.querySelector('[data-act="comments"]').addEventListener("click", () => openComments(v));
     slide.querySelector('[data-act="share"]').addEventListener("click", () => doShare(v));
     slide.querySelector('[data-act="save"]').addEventListener("click", async (e) => {
       if (needLogin()) return;
-      const on = await store.toggleSave(me.id, v.id);
+      const was = savedSet.has(v.id);
+      const on = !was;
+      // Optimistic: the bookmark fills at once; revert only on failure.
       savedSet[on ? "add" : "delete"](v.id);
       e.currentTarget.classList.toggle("saved", on);
-      toast(on ? "Saved to your profile." : "Removed from saved.");
+      try {
+        const serverOn = await store.toggleSave(me.id, v.id);
+        if (serverOn !== on) {
+          savedSet[serverOn ? "add" : "delete"](v.id);
+          e.currentTarget.classList.toggle("saved", serverOn);
+        } else toast(on ? "Saved to your profile." : "Removed from saved.");
+      } catch (err) {
+        savedSet[was ? "add" : "delete"](v.id);
+        e.currentTarget.classList.toggle("saved", was);
+        toast(err.message);
+      }
     });
     slide.querySelector('[data-act="more"]').addEventListener("click", () => moreMenu(v, slide));
     slide.querySelectorAll('[data-act="profile"]').forEach((el) => el.addEventListener("click", () => openProfile(v.creator_id)));
@@ -794,19 +864,36 @@
     if (needLogin()) return;
     const was = likedSet.has(v.id);
     if (fromDoubleTap && was) return; // double-tap only adds a like
-    let on; try { on = await store.toggleLike(me.id, v.id); } catch (e) { toast(e.message); return; }
-    likedSet[on ? "add" : "delete"](v.id);
+    const on = !was;
     const btn = slide.querySelector('[data-act="like"]');
-    btn.classList.toggle("liked", on);
-    btn.querySelector(".bubble").innerHTML = icon("heart");
     const countEl = slide.querySelector("[data-like-count]");
-    countEl.textContent = fmt(Math.max(0, (parseInt(countEl.dataset.raw || v.like_count, 10) || 0) + (on ? 1 : -1)));
-    countEl.dataset.raw = String((parseInt(countEl.dataset.raw || v.like_count, 10) || 0) + (on ? 1 : -1));
-    if (on) {
-      const h = document.createElement("div");
-      h.className = "heart-pop"; h.innerHTML = icon("heart");
-      h.style.left = "50%"; h.style.top = "38%"; h.style.marginLeft = "-44px";
-      slide.appendChild(h); setTimeout(() => h.remove(), 750);
+    const base = parseInt(countEl.dataset.raw || v.like_count, 10) || 0;
+    const applyLikeUI = (state) => {
+      likedSet[state ? "add" : "delete"](v.id);
+      btn.classList.toggle("liked", state);
+      btn.querySelector(".bubble").innerHTML = icon("heart");
+      countEl.textContent = fmt(Math.max(0, base + (state ? 1 : -1)));
+      countEl.dataset.raw = String(Math.max(0, base + (state ? 1 : -1)));
+      if (state) {
+        const h = document.createElement("div");
+        h.className = "heart-pop"; h.innerHTML = icon("heart");
+        h.style.left = "50%"; h.style.top = "38%"; h.style.marginLeft = "-44px";
+        slide.appendChild(h); setTimeout(() => h.remove(), 750);
+      }
+    };
+    // Optimistic: the heart fills at once (TikTok-style); the server
+    // call follows, and the UI reverts only if it actually fails.
+    applyLikeUI(on);
+    try {
+      const serverOn = await store.toggleLike(me.id, v.id);
+      if (serverOn !== on) applyLikeUI(serverOn);
+    } catch (e) {
+      likedSet[was ? "add" : "delete"](v.id);
+      btn.classList.toggle("liked", was);
+      btn.querySelector(".bubble").innerHTML = icon("heart");
+      countEl.textContent = fmt(base);
+      countEl.dataset.raw = String(base);
+      toast(e.message);
     }
   }
   function videoLink(v) { return location.href.split("#")[0] + "#v=" + v.id; }
@@ -1179,6 +1266,10 @@
   });
 
   function showCreateScreen(name) {
+    if (!restoringBack && name !== createScreen) {
+      backStack.push({ view: "create", create: createScreen });
+      if (backStack.length > 30) backStack.shift();
+    }
     createScreen = name;
     ["camera", "edit", "post", "home"].forEach((n) => {
       const el = n === "camera" ? $("#createCamera") : n === "edit" ? $("#createEdit") : n === "post" ? $("#createPost") : $("#createHome");
@@ -1424,6 +1515,45 @@
     // Tapping it detaches the sound and restores original audio.
     const clearBtn = $("#editSoundClear");
     if (clearBtn) clearBtn.classList.toggle("hidden", !uploadSound);
+    applyPreviewSound();
+  }
+
+  /* ---- preview sound: when a library sound is attached, the edit/post
+   * preview plays THAT sound (video muted) so the user can hear the sound
+   * is on the video — TikTok-style. Without a sound, the preview plays
+   * the video's own audio. */
+  let previewSoundAudio = null;
+  function stopPreviewSound() {
+    if (previewSoundAudio) { try { previewSoundAudio.pause(); } catch (e) {} previewSoundAudio = null; }
+  }
+  function bindPreviewSound(videoEl) {
+    if (!videoEl || videoEl._soundBound) return;
+    videoEl._soundBound = true;
+    videoEl.addEventListener("play", () => {
+      if (!previewSoundAudio) return;
+      try { previewSoundAudio.currentTime = Math.max(0, (videoEl.currentTime || 0) - (uploadTrimStart || 0)); } catch (e) {}
+      previewSoundAudio.play().catch(() => {});
+    });
+    videoEl.addEventListener("pause", () => { if (previewSoundAudio) previewSoundAudio.pause(); });
+    videoEl.addEventListener("seeked", () => {
+      if (!previewSoundAudio || videoEl.paused) return;
+      try { previewSoundAudio.currentTime = Math.max(0, (videoEl.currentTime || 0) - (uploadTrimStart || 0)); } catch (e) {}
+    });
+  }
+  function applyPreviewSound() {
+    stopPreviewSound();
+    const pv = $("#editPreview"), ppv = $("#postPreviewVideo");
+    [pv, ppv].forEach((el) => { if (el) { try { el.muted = !!(uploadSound && uploadSound.src); } catch (e) {} } });
+    if (!uploadSound || !uploadSound.src) return;
+    bindPreviewSound(pv); bindPreviewSound(ppv);
+    previewSoundAudio = new Audio(uploadSound.src);
+    previewSoundAudio.loop = true;
+    previewSoundAudio.preload = "auto";
+    const playing = [pv, ppv].find((el) => el && !el.paused && !el.closest(".hidden"));
+    if (playing) {
+      try { previewSoundAudio.currentTime = Math.max(0, (playing.currentTime || 0) - (uploadTrimStart || 0)); } catch (e) {}
+      previewSoundAudio.play().catch(() => {});
+    }
   }
 
   /* ---- sounds library ---- */
@@ -1600,6 +1730,7 @@
       if (uploadThumb) pv.poster = uploadThumb;
       pv.style.filter = FILTER_CSS[uploadFilter] || "";
       pv.play().catch(() => {});
+      applyPreviewSound();
     }
     $("#disclosureState").textContent = uploadDisclosure ? "On" : "Off";
     $("#locationState").textContent = uploadLocation || "Add location";
@@ -1879,7 +2010,7 @@
         // { video, upload_url: null } (no PUT step — upload_url is
         // always null, so the guard below never fires). The row is
         // created with the live status directly — no review queue.
-        created = await store.submitVideo(me.id, { ...meta, file: uploadFile, filename: uploadFile.name, content_type: uploadFile.type, onProgress: opts && opts.onProgress });
+        created = await store.submitVideo(me.id, { ...meta, file: uploadFile, filename: uploadFile.name, content_type: uploadFile.type, onProgress: opts && opts.onProgress, onRetry: (attempt) => { if (msgEl) { msgEl.textContent = "Connection lost — retrying upload… (attempt " + (attempt + 1) + ")"; msgEl.style.color = ""; } } });
         if (created && created.upload_url) {
           await fetch(created.upload_url, { method: "PUT", headers: { "Content-Type": uploadFile.type }, body: uploadFile });
         }
@@ -1922,7 +2053,7 @@
       setUploadProgress(100, true);
       await new Promise((r) => setTimeout(r, 900));
       hideUploadProgress();
-      showCreateScreen("home"); goto("home");
+      showCreateScreen("home"); goto("home", null, { clearStack: true });
     } else {
       hideUploadProgress();
     }

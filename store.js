@@ -2062,15 +2062,17 @@
              * files with a plain message instead of the endpoint's. */
             if (typeof File !== "undefined" && !(upFile instanceof File)) { try { upFile = new File([upFile], (m.filename || "video.mp4"), { type: m.content_type || upFile.type || "video/mp4" }); } catch (e) {} }
             if (!upFile || !upFile.size) throw new Error("This video file is empty (0 bytes) — please choose the video again.");
-            const upArgs = { bucketId: MEDIA_BUCKET, fileId: ID.unique(), file: upFile, permissions: filePerms };
-            if (typeof m.onProgress === "function") upArgs.onProgress = (ev) => { try { m.onProgress(ev && typeof ev.progress === "number" ? ev.progress : 0); } catch (e) {} };
-            const uploaded = await storage.createFile(upArgs);
+            const uploaded = await withUploadRetries(async () => {
+              const args = { bucketId: MEDIA_BUCKET, fileId: ID.unique(), file: upFile, permissions: filePerms };
+              if (typeof m.onProgress === "function") args.onProgress = (ev) => { try { m.onProgress(ev && typeof ev.progress === "number" ? ev.progress : 0); } catch (e) {} };
+              return storage.createFile(args);
+            }, m.onRetry);
             fileId = (uploaded && (uploaded.$id || uploaded.id)) || null;
           }
           if (!thumbFileId && typeof thumbPath === "string" && thumbPath.indexOf("data:") === 0) {
             const blob = dataUrlToBlob(thumbPath);
             if (blob && blob.size > 0 && storage && typeof storage.createFile === "function") {
-              const uploadedThumb = await storage.createFile({ bucketId: MEDIA_BUCKET, fileId: ID.unique(), file: toFile(blob, "thumbnail.jpg"), permissions: filePerms });
+              const uploadedThumb = await withUploadRetries(async () => storage.createFile({ bucketId: MEDIA_BUCKET, fileId: ID.unique(), file: toFile(blob, "thumbnail.jpg"), permissions: filePerms }), m.onRetry);
               thumbFileId = (uploadedThumb && (uploadedThumb.$id || uploadedThumb.id)) || null;
             }
           }
@@ -2082,6 +2084,7 @@
         const payload = Object.assign({}, m);
         delete payload.file;
         delete payload.onProgress;
+        delete payload.onRetry;
         delete payload.fileId;
         delete payload.file_id;
         delete payload.thumbnailFileId;
@@ -2108,7 +2111,7 @@
         }
         let result;
         try {
-          result = await callApi("create-upload", payload);
+          result = await withUploadRetries(() => callApi("create-upload", payload), m.onRetry);
         } catch (e) {
           throw asError(e);
         }
@@ -2565,6 +2568,39 @@
   function toFile(blob, name) {
     try { return new File([blob], name, { type: blob.type || "image/jpeg" }); }
     catch (e) { return blob; }
+  }
+
+  /* Uploads over a flaky mobile connection drop mid-way (the SDK throws
+   * "Failed to fetch" / TypeError network errors). Retry transient
+   * failures with backoff instead of failing the post at once; if the
+   * device is offline, wait for it to come back (up to 15s) — TikTok
+   * finishes the upload when the net returns instead of failing it. */
+  function isTransientUploadError(e) {
+    if (!e) return false;
+    const m = String((e && e.message) || "");
+    if (/failed to fetch|networkerror|network request failed|load failed/i.test(m)) return true;
+    const code = e.code || e.status;
+    return code === 0 || code === 408 || code === 429 || code === 502 || code === 503 || code === 504;
+  }
+  async function withUploadRetries(fn, onRetry) {
+    let delay = 1200;
+    for (let attempt = 1; attempt <= 4; attempt++) {
+      try { return await fn(); }
+      catch (e) {
+        if (attempt === 4 || !isTransientUploadError(e)) throw e;
+        try { if (typeof onRetry === "function") onRetry(attempt); } catch (err) {}
+        if (typeof navigator !== "undefined" && navigator.onLine === false) {
+          await new Promise((res) => {
+            const go = () => { try { window.removeEventListener("online", go); } catch (err) {} res(); };
+            try { window.addEventListener("online", go); } catch (err) {}
+            setTimeout(res, 15000);
+          });
+        } else {
+          await new Promise((r) => setTimeout(r, delay));
+          delay *= 2;
+        }
+      }
+    }
   }
 
   function createStore(storage, backendClient) {
