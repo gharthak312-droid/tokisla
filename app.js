@@ -2577,7 +2577,20 @@
   /* No pause on tab switch: the owner wants a playing video to keep
      playing when he opens another tab/app (2026-11-05). The old
      visibilitychange handler that paused everything is removed on
-     purpose; in-app navigation still pauses via goto()/openStories(). */
+     purpose; in-app navigation still pauses via goto()/openStories().
+     Resume on return: browsers may suspend a video themselves while
+     the tab is hidden (notably one that started by autoplay before any
+     tap). Our code never pauses it — but nothing would restart it
+     either — so when the tab becomes visible again, restart the active
+     feed video ONLY if it was playing when the tab hid (a video the
+     user paused himself stays paused). */
+  let vidPlayingOnHide = false;
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) { vidPlayingOnHide = !!(activeVid && !activeVid.paused && atFeedRoot()); return; }
+    if (!vidPlayingOnHide || !activeVid || !activeVid.paused) return;
+    vidPlayingOnHide = false;
+    tryPlay(activeVid);
+  });
 
   boot();
 })();
