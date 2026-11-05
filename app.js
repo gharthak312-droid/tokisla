@@ -1224,9 +1224,24 @@
       cv.srcObject = camStream;
       cv.style.filter = FILTER_CSS[uploadFilter] || "";
     } catch (e) {
-      // Never hard-fail: the gallery picker must still work.
-      if (unavail) unavail.classList.remove("hidden");
-      if (msg) msg.textContent = "Camera unavailable or permission denied — you can still pick a video from your gallery.";
+      /* Video + mic are asked together, so a denied MIC alone kills the
+       * camera too — even when the camera permission is allowed. Retry
+       * video-only: the camera works, the clip just has no sound. */
+      try {
+        camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: camFacing } });
+        const cv = $("#camVideo");
+        cv.srcObject = camStream;
+        cv.style.filter = FILTER_CSS[uploadFilter] || "";
+        if (msg) msg.textContent = "Mic ki permission nahi mili — video bina awaz ke record hogi. Awaz ke liye Settings me Microphone allow karein.";
+        return;
+      } catch (e2) {
+        // Never hard-fail: the gallery picker must still work.
+        const why = e2 && e2.name === "NotFoundError" ? "Is device par camera nahi mila."
+          : e2 && e2.name === "NotReadableError" ? "Camera kisi aur app me use ho raha hai."
+          : "Camera ki permission nahi mili — Settings me Camera allow karein.";
+        if (unavail) { unavail.textContent = why + " Gallery se video ab bhi pick kar sakte hain."; unavail.classList.remove("hidden"); }
+        if (msg) msg.textContent = why + " Gallery se video ab bhi pick kar sakte hain.";
+      }
     }
   }
   function camTick() {
