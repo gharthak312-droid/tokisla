@@ -42,6 +42,9 @@
   .status.pending{background:#fdf3d7;color:#7a5b12}.status.approved{background:#F0EAFB;color:var(--emerald-dark)}
   .status.rejected{background:#fdecec;color:#8f1d1d}.status.open{background:#fdecec;color:#8f1d1d}
   .status.reviewed,.status.dismissed{background:#F0EAFB;color:var(--emerald-dark)}
+  .status.needs_review{background:#fdf3d7;color:#7a5b12}
+  .vthumb{width:96px;height:128px;object-fit:cover;border-radius:10px;flex:none;background:#111;cursor:pointer}
+  .user-sub{margin:6px 2px 0;padding:10px;border:1px solid var(--line);border-left:3px solid var(--emerald);border-radius:0 0 12px 12px;background:#fcfbfe}
   .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:#12241c;color:#fff;padding:11px 16px;border-radius:12px;font-size:13.5px;z-index:50;box-shadow:0 8px 24px rgba(0,0,0,.25)}
   .err{background:#fdecec;color:#8f1d1d;border:1px solid #f5c6c6;padding:10px 12px;border-radius:10px;font-size:13px;margin:10px 0}
   label{font-size:13px;font-weight:600;display:block;margin-bottom:6px}
@@ -82,6 +85,7 @@
       <button class="tab" data-tab="queue">Moderation Queue <span id="queueCount"></span></button>
       <button class="tab" data-tab="stories">Stories <span id="storyCount"></span></button>
       <button class="tab" data-tab="reports">Reports</button>
+      <button class="tab" data-tab="restricted">Restricted <span id="restrictedCount"></span></button>
       <button class="tab" data-tab="users">Users</button>
       <button class="tab" data-tab="sounds">Sounds</button>
       <button class="tab" data-tab="categories">Categories</button>
@@ -98,13 +102,18 @@
       </div>
       <div class="card" style="margin-top:14px">
         <h3 style="margin:0 0 6px">How moderation works</h3>
-        <p class="muted" style="line-height:1.6;margin:0">Posts go live <b>immediately</b> — there is no pre-publication review and nothing waits here to be published. When a video is reported for breaking the rules (music, women, haram content), act on it in the Reports tab: remove it and apply a strike. The Moderation Queue below only holds older videos that were pending before this change. You can still Approve, Reject (with a reason the creator will see), or mark Needs review on those.</p>
+        <p class="muted" style="line-height:1.6;margin:0">Posts go live <b>immediately</b> — there is no pre-publication review and nothing waits here to be published. When a video is reported for breaking the rules (music, women, haram content), it is restricted at once: it leaves the feed and lands in the <b>Restricted</b> tab. Check it there, then <b>Delete</b> it or <b>Restore</b> it. Every restricted video is 1 strike; at <b>3 strikes</b> the account is suspended automatically. The Moderation Queue below only holds older videos that were pending before this change. You can still Approve, Reject (with a reason the creator will see), or mark Needs review on those.</p>
       </div>
     </section>
 
     <section id="tab-queue" class="hidden"><div id="queueList"></div></section>
     <section id="tab-stories" class="hidden"><div id="storyList"></div></section>
     <section id="tab-reports" class="hidden"><div id="reportList"></div></section>
+    <section id="tab-restricted" class="hidden">
+      <div class="card" style="margin-bottom:12px"><h3 style="margin:0 0 6px">Restricted — reported videos</h3>
+      <p class="muted" style="line-height:1.6;margin:0">A video lands here the moment someone reports it (it leaves the feed at once). Check it, then <b>Delete</b> it or <b>Restore</b> it. Delete removes the video and tells the creator why, with the strikes they have left. Restore puts it back live and clears that strike. Every restricted video is 1 strike; at <b>3 strikes</b> the account is suspended automatically (restore it from the Users tab if that was a mistake). A direct Delete from anywhere else carries no strike — restrict the video first when it should count as one.</p></div>
+      <div id="restrictedList"></div>
+    </section>
     <section id="tab-users" class="hidden"><div id="verifyBox"></div><div id="userList"></div></section>
     <section id="tab-sounds" class="hidden">
       <div class="card" style="margin-bottom:12px">
@@ -245,12 +254,19 @@
       );
     } catch (e) { /* realtime unavailable: the 30s timer still updates the numbers */ }
   }
-  $$(".tab").forEach((t) => t.addEventListener("click", () => {
-    $$(".tab").forEach((x) => x.classList.toggle("active", x === t));
-    ["dashboard", "queue", "stories", "reports", "users", "sounds", "categories", "log"].forEach((n) => $("#tab-" + n).classList.toggle("hidden", n !== t.dataset.tab));
+  let strikeCounts = {};
+  const expandedUsers = new Set();
+  let focusUserId = null;
+  function showTab(name) {
+    $$(".tab").forEach((x) => x.classList.toggle("active", x.dataset.tab === name));
+    ["dashboard", "queue", "stories", "reports", "restricted", "users", "sounds", "categories", "log"].forEach((n) => $("#tab-" + n).classList.toggle("hidden", n !== name));
     refreshAll();
-  }));
-  async function refreshAll() { renderStats(); renderAnalytics(); renderQueue(); renderStories(); renderReports(); renderUsers(); renderVerify(); renderSounds(); renderCategories(); renderLog(); }
+  }
+  $$(".tab").forEach((t) => t.addEventListener("click", () => showTab(t.dataset.tab)));
+  async function refreshAll() {
+    try { strikeCounts = (typeof store.adminStrikes === "function") ? await store.adminStrikes().catch(() => ({})) : {}; } catch (e) { strikeCounts = {}; }
+    renderStats(); renderAnalytics(); renderQueue(); renderStories(); renderReports(); renderRestricted(); renderUsers(); renderVerify(); renderSounds(); renderCategories(); renderLog();
+  }
 
   /* ---- Sounds library (admin adds audio; users add sounds too, direct-to-library; originals auto-register) ---- */
   function soundDurationOf(file) {
@@ -346,12 +362,73 @@
     });
   }
 
+  /* ---- Video rows (shared by Dashboard, Users sub-lists, Restricted) ---- */
+  function videoThumb(v) {
+    if (v.thumbnail_path) return `<img class="vthumb" src="${esc(v.thumbnail_path)}" data-play="${esc(v.storage_path || "")}" alt="">`;
+    if (v.storage_path) return `<video class="vthumb" src="${esc(v.storage_path)}" data-play="${esc(v.storage_path)}" muted playsinline preload="metadata"></video>`;
+    return `<div class="vthumb" style="display:flex;align-items:center;justify-content:center;color:#888;font-size:12px">No preview</div>`;
+  }
+  function videoRowHtml(v) {
+    return `<div class="row-item" data-vid="${esc(v.id)}">${videoThumb(v)}
+      <div class="grow"><div class="cap" style="font-weight:600">${esc(v.caption || "Untitled")}</div>
+      <div class="small muted">@${esc(v.username || v.creator_id)} · ${v.view_count || 0} views · ${v.like_count || 0} likes · ${v.comment_count || 0} comments${v.duration_seconds ? " · " + v.duration_seconds + "s" : ""} · ${ago(v.created_at)}${v.moderation_status && v.moderation_status !== "approved" ? ` · <span class="status ${esc(v.moderation_status)}">${esc(v.moderation_status)}</span>` : ""}</div></div>
+      <button class="btn btn-ghost" data-edit-video="${esc(v.id)}" style="height:37px">Edit</button>
+      <button class="btn btn-danger" data-del-video="${esc(v.id)}" style="height:37px">Delete</button></div>`;
+  }
+  function wireVideoRowButtons(box, videos, onDone) {
+    const done = onDone || (() => refreshAll());
+    $$("[data-del-video]", box).forEach((b) => b.addEventListener("click", async () => {
+      const vid = b.dataset.delVideo;
+      if (!vid || !confirm("Ye video hamesha ke liye delete kar dein?")) return;
+      try { await store.deleteVideo(me.id, vid); toast("Video deleted."); done(); }
+      catch (ex) { toast(ex.message || "Delete nahi hui."); }
+    }));
+    $$("[data-edit-video]", box).forEach((b) => b.addEventListener("click", () => {
+      const vid = b.dataset.editVideo;
+      const row = b.closest("[data-vid]");
+      const capEl = row && row.querySelector(".cap");
+      const v = videos.find((x) => x.id === vid);
+      if (!row || !capEl || !v) return;
+      if (row.querySelector(".cap-edit")) return;
+      const wrap = document.createElement("div");
+      wrap.innerHTML = `<input class="cap-edit" maxlength="300" style="margin:4px 0" value="${esc(v.caption || "")}">`;
+      const save = document.createElement("button");
+      save.className = "btn btn-primary"; save.style.height = "37px"; save.textContent = "Save";
+      const cancel = document.createElement("button");
+      cancel.className = "btn btn-ghost"; cancel.style.height = "37px"; cancel.textContent = "Cancel";
+      wrap.appendChild(save); wrap.appendChild(cancel);
+      capEl.replaceWith(wrap);
+      const input = wrap.querySelector(".cap-edit");
+      input.focus();
+      cancel.addEventListener("click", () => done());
+      save.addEventListener("click", async () => {
+        try { await store.editVideo(vid, input.value); toast("Caption saved."); done(); }
+        catch (ex) { toast(ex.message || "Save nahi hua."); }
+      });
+    }));
+  }
+  /* Thumbnails: tap an image to play the video in place; tap a video
+   * to pause / resume. One delegated listener for every list. */
+  document.addEventListener("click", (e) => {
+    const img = e.target && e.target.closest ? e.target.closest("img.vthumb[data-play]") : null;
+    if (img) {
+      const src = img.dataset.play;
+      if (!src) return;
+      const vid = document.createElement("video");
+      vid.className = "vthumb"; vid.src = src; vid.controls = true; vid.autoplay = true; vid.playsInline = true;
+      img.replaceWith(vid);
+      return;
+    }
+    const vd = e.target && e.target.closest ? e.target.closest("video.vthumb") : null;
+    if (vd) { if (vd.paused) vd.play(); else vd.pause(); }
+  });
+
   async function renderStats() {
     const s = await store.adminStats().catch(() => null); if (!s) return;
     $("#queueCount").textContent = s.pending ? "(" + s.pending + ")" : "";
     $("#statCards").innerHTML = [
       ["Users", s.users], ["Approved videos", s.approved], ["Pending review", s.pending],
-      ["Rejected videos", s.rejected], ["Open reports", s.openReports],
+      ["Rejected videos", s.rejected], ["Restricted", s.restricted || 0], ["Open reports", s.openReports],
     ].map(([l, n]) => `<div class="stat"><div class="n">${n}</div><div class="l">${l}</div></div>`).join("");
   }
 
@@ -363,14 +440,9 @@
       ["Total comments", a.totalComments], ["Approved videos", a.videos],
     ].map(([l, n]) => `<div class="stat"><div class="n">${n}</div><div class="l">${l}</div></div>`).join("");
     $("#topVideos").innerHTML = a.top.length
-      ? '<h4 style="margin:0 0 8px">Sab videos — views ke hisab se (' + a.top.length + ')</h4>' + a.top.map((v) => `<div class="row-item"><div class="grow"><div style="font-weight:600">${esc(v.caption || "Untitled")}</div><div class="small muted">@${esc(v.username || v.creator_id)} · ${v.view_count || 0} views · ${v.like_count || 0} likes · ${v.comment_count || 0} comments</div></div><button class="btn btn-danger" data-del-video="${esc(v.id)}" style="height:37px">Delete</button></div>`).join("")
+      ? '<h4 style="margin:0 0 8px">Sab videos — views ke hisab se (' + a.top.length + ')</h4>' + a.top.map((v) => videoRowHtml(v)).join("")
       : '<p class="muted" style="margin:0">Abhi koi approved video nahi hai.</p>';
-    $$("#topVideos [data-del-video]").forEach((b) => b.addEventListener("click", async () => {
-      const vid = b.dataset.delVideo;
-      if (!vid || !confirm("Ye video hamesha ke liye delete kar dein?")) return;
-      try { await store.deleteVideo(me.id, vid); toast("Video deleted."); refreshAll(); }
-      catch (ex) { toast(ex.message || "Delete nahi hui."); }
-    }));
+    wireVideoRowButtons($("#topVideos"), a.top);
     const upd = $("#analyticsUpdated");
     if (upd) upd.textContent = "· aakhri update: " + new Date().toLocaleTimeString();
   }
@@ -473,20 +545,80 @@
     $$("[data-verify-no]").forEach((b) => b.addEventListener("click", async () => { await store.adminDecideVerification(me.id, b.dataset.verifyNo, "rejected"); toast("Application rejected."); refreshAll(); }));
   }
 
+  async function renderRestricted() {
+    const list = await store.adminRestricted().catch(() => []);
+    const box = $("#restrictedList");
+    if (!box) return;
+    $("#restrictedCount").textContent = list.length ? "(" + list.length + ")" : "";
+    box.innerHTML = list.length ? "" : '<div class="card"><p class="muted" style="margin:0">No restricted videos. A video appears here the moment someone reports it.</p></div>';
+    list.forEach((v) => {
+      const strikes = strikeCounts[v.creator_id] || 0;
+      const reason = (v.reports && v.reports.length) ? v.reports.map((r) => r.reason).join(" · ") : "Reported";
+      const el = document.createElement("div");
+      el.className = "row-item";
+      el.setAttribute("data-vid", v.id);
+      el.innerHTML = `${videoThumb(v)}
+        <div class="grow"><div class="cap" style="font-weight:600">${esc(v.caption || "Untitled")}</div>
+        <div class="small muted">@${esc(v.username || v.creator_id)}${v.duration_seconds ? " · " + v.duration_seconds + "s" : ""} · ${ago(v.created_at)} · Strikes: ${strikes}/3</div>
+        <div class="small" style="color:#8f1d1d">Reported: ${esc(reason)}</div></div>
+        <button class="btn btn-ghost" data-view-account style="height:37px">Account</button>
+        <button class="btn btn-ghost" data-edit-video="${esc(v.id)}" style="height:37px">Edit</button>
+        <button class="btn btn-primary" data-restore style="height:37px">Restore</button>
+        <button class="btn btn-danger" data-del-restricted="${esc(v.id)}" style="height:37px">Delete</button>`;
+      el.querySelector("[data-view-account]").addEventListener("click", () => { focusUserId = v.creator_id; showTab("users"); });
+      el.querySelector("[data-restore]").addEventListener("click", async () => {
+        try {
+          await store.adminDecide(me.id, v.id, "approved", "");
+          toast("Restored — live again, strike cleared.");
+          refreshAll();
+        } catch (ex) { toast(ex.message); }
+      });
+      el.querySelector("[data-del-restricted]").addEventListener("click", async () => {
+        if (!confirm("Ye video hamesha ke liye delete kar dein? Creator ko notice milega ke restricted hone par delete hui, aur unke strikes bataye jayenge.")) return;
+        try {
+          await store.deleteVideo(me.id, v.id);
+          for (const r of (v.reports || [])) { try { await store.adminSetReportStatus(r.id, "reviewed"); } catch (_e) {} }
+          toast("Video deleted — creator notified with strikes left.");
+          refreshAll();
+        } catch (ex) { toast(ex.message || "Delete nahi hui."); }
+      });
+      box.appendChild(el);
+    });
+    wireVideoRowButtons(box, list, () => refreshAll());
+  }
+
   async function renderUsers() {
     const list = await store.adminUsers().catch(() => []);
     const box = $("#userList");
     box.innerHTML = "";
     list.forEach((u) => {
+      const strikes = strikeCounts[u.id] || 0;
       const el = document.createElement("div");
-      el.className = "row-item";
-      el.innerHTML = `<div class="grow"><div style="font-weight:600">@${esc(u.username)} ${u.role !== "user" ? `<span class="status approved">${esc(u.role)}</span>` : ""} ${u.is_suspended ? '<span class="status rejected">suspended</span>' : ""}</div>
+      el.className = "card";
+      el.style.cssText = "padding:12px;margin-bottom:12px";
+      el.innerHTML = `<div class="row-item" style="margin-bottom:0;border:none;padding:4px 6px"><div class="grow"><div style="font-weight:600">@${esc(u.username)} ${u.role !== "user" ? `<span class="status approved">${esc(u.role)}</span>` : ""} ${u.is_suspended ? '<span class="status rejected">suspended</span>' : ""} ${strikes ? `<span class="status needs_review">Strikes: ${strikes}/3</span>` : ""}</div>
         <div class="small muted">${esc(u.display_name || "")} · joined ${ago(u.created_at || Date.now())}</div></div>
-        ${u.id !== me.id && u.role !== "admin" ? `<button class="btn ${u.is_suspended ? "btn-ghost" : "btn-danger"}" style="height:37px">${u.is_suspended ? "Restore" : "Suspend"}</button>` : ""}`;
-      const b = el.querySelector("button");
-      if (b) b.addEventListener("click", async () => { await store.adminSetSuspended(u.id, !u.is_suspended); toast(u.is_suspended ? "User restored." : "User suspended — their videos are hidden."); refreshAll(); });
+        <button class="btn btn-ghost" data-videos style="height:37px">Videos</button>
+        ${u.id !== me.id && u.role !== "admin" ? `<button class="btn ${u.is_suspended ? "btn-ghost" : "btn-danger"}" data-suspend style="height:37px">${u.is_suspended ? "Restore" : "Suspend"}</button>` : ""}</div>
+        <div class="user-sub hidden"></div>`;
+      const sub = el.querySelector(".user-sub");
+      const loadSub = async () => {
+        sub.classList.remove("hidden");
+        sub.innerHTML = '<p class="muted small" style="margin:0">Loading videos…</p>';
+        const vids = await store.adminUserVideos(u.id).catch(() => []);
+        sub.innerHTML = vids.length ? vids.map((v) => videoRowHtml(v)).join("") : '<p class="muted small" style="margin:0">Is account ki koi video nahi hai.</p>';
+        wireVideoRowButtons(sub, vids, loadSub);
+      };
+      el.querySelector("[data-videos]").addEventListener("click", async () => {
+        if (sub.classList.contains("hidden")) { expandedUsers.add(u.id); await loadSub(); }
+        else { expandedUsers.delete(u.id); sub.classList.add("hidden"); }
+      });
+      const sb = el.querySelector("[data-suspend]");
+      if (sb) sb.addEventListener("click", async () => { await store.adminSetSuspended(u.id, !u.is_suspended); toast(u.is_suspended ? "User restored." : "User suspended — their videos are hidden."); refreshAll(); });
       box.appendChild(el);
+      if (expandedUsers.has(u.id) || focusUserId === u.id) { expandedUsers.add(u.id); loadSub(); }
     });
+    focusUserId = null;
   }
 
   async function renderCategories() {

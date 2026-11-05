@@ -2348,12 +2348,35 @@
     const ns = await store.notifications(me.id).catch(() => []);
     const box = $("#notifList"); box.innerHTML = "";
     $("#notifEmpty").classList.toggle("hidden", ns.length > 0);
+    /* Moderation notices carry the reason + strikes left (server
+     * computed — the review rows are admin-only, so the user cannot
+     * read them directly). Best-effort: a failed fetch falls back to
+     * the generic text. */
+    let mod = null;
+    try {
+      if (typeof store.myModeration === "function") mod = await store.myModeration().catch(() => null);
+    } catch (e) { mod = null; }
     const text = { follow: "started following you", like: "liked your video", comment: "commented on your video", share: "shared a video with you", moderation: "your video review was completed", system: "" };
+    if (mod && mod.suspended) {
+      const banner = document.createElement("div");
+      banner.className = "list-item";
+      banner.innerHTML = `<div class="grow"><div class="t" style="color:var(--error)">Your account is suspended — 3 strikes.</div><div class="s">Your videos are hidden until the suspension is lifted.</div></div>`;
+      box.appendChild(banner);
+    }
     ns.forEach((n) => {
+      let msg = text[n.type] || "";
+      if (n.type === "moderation" && mod && n.video_id) {
+        const ev = (mod.events || []).find((x) => x.video_id === n.video_id);
+        if (ev) {
+          if (ev.decision === "deleted") msg = "removed your video for breaking the rules" + (ev.reason ? " (" + ev.reason + ")" : "");
+          else if (ev.status === "approved") msg = "reviewed your video — it is live again";
+          else msg = "restricted your video for breaking the rules" + (ev.reason ? " (" + ev.reason + ")" : "") + " — Strikes: " + (mod.strikes || 0) + "/3, " + (mod.chancesLeft || 0) + " chance(s) left";
+        }
+      }
       const el = document.createElement("div");
       el.className = "list-item";
       el.innerHTML = `${avatarHtml({ username: n.actor_name, display_name: n.actor_name, avatar_url: n.actor_avatar }, "")}
-        <div class="grow"><div class="t" style="font-weight:${n.is_read ? 500 : 700}">@${esc(n.actor_name || "Tokisla")} <span style="font-weight:400">${esc(text[n.type] || "")}</span></div>
+        <div class="grow"><div class="t" style="font-weight:${n.is_read ? 500 : 700}">@${esc(n.actor_name || "Tokisla")} <span style="font-weight:400">${esc(msg)}</span></div>
         <div class="s">${ago(n.created_at)} ago</div></div>`;
       box.appendChild(el);
     });

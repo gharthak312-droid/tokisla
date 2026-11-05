@@ -2437,7 +2437,10 @@
         } catch (e) { throw asError(e); }
       },
       async adminQueue() {
-        const rows = await listMapped("videos", [Q.equal("moderation_status", ["pending", "needs_review"]), Q.orderAsc("$createdAt"), Q.limit(100)], mapVideo);
+        /* "needs_review" is the Restricted state now — those videos
+         * live in the Restricted tab, not this queue. This queue only
+         * holds older pending videos. */
+        const rows = await listMapped("videos", [Q.equal("moderation_status", "pending"), Q.orderAsc("$createdAt"), Q.limit(100)], mapVideo);
         const profById = await getPublicProfiles(rows.map((v) => v.creator_id));
         rows.forEach((v) => {
           const p = profById[v.creator_id];
@@ -2466,14 +2469,15 @@
         } catch (e) { throw asError(e); }
       },
       async adminStats() {
-        const [u, a, p, r, rep] = await Promise.all([
+        const [u, a, p, r, rep, res] = await Promise.all([
           countRows("profiles", []),
           countRows("videos", [Q.equal("moderation_status", "approved")]),
-          countRows("videos", [Q.equal("moderation_status", ["pending", "needs_review"])]),
+          countRows("videos", [Q.equal("moderation_status", "pending")]),
           countRows("videos", [Q.equal("moderation_status", "rejected")]),
           countRows("reports", [Q.equal("status", "open")]),
+          countRows("videos", [Q.equal("moderation_status", "needs_review")]),
         ]);
-        return { users: u || 0, approved: a || 0, pending: p || 0, rejected: r || 0, openReports: rep || 0 };
+        return { users: u || 0, approved: a || 0, pending: p || 0, rejected: r || 0, openReports: rep || 0, restricted: res || 0 };
       },
       /* Live analytics: totals + every approved video by views. Reads
        * the 100 most-viewed approved videos, so totals are exact while
@@ -2511,6 +2515,45 @@
       },
       async adminReviews() {
         return listMapped("moderation_reviews", [Q.orderDesc("$createdAt"), Q.limit(100)], mapRow);
+      },
+      /* Per-account videos (Users tab) — every status, newest first. */
+      async adminUserVideos(userId) {
+        const rows = await listMapped("videos", [Q.equal("creator_id", userId), Q.orderDesc("$createdAt"), Q.limit(100)], mapVideo);
+        const profById = await getPublicProfiles([userId]);
+        const p = profById[userId];
+        rows.forEach((v) => { if (p) v.username = p.username; });
+        return rows;
+      },
+      /* Restricted tab — videos a report (or the admin) flagged. The
+       * open report reasons ride along so the admin sees why. */
+      async adminRestricted() {
+        const rows = await listMapped("videos", [Q.equal("moderation_status", "needs_review"), Q.orderAsc("$createdAt"), Q.limit(100)], mapVideo);
+        const profById = await getPublicProfiles(rows.map((v) => v.creator_id));
+        rows.forEach((v) => { const p = profById[v.creator_id]; if (p) v.username = p.username; });
+        const reps = await listMapped("reports", [Q.equal("status", "open"), Q.limit(100)], mapRow).catch(() => []);
+        rows.forEach((v) => { v.reports = reps.filter((r) => r.target_type === "video" && r.target_id === v.id); });
+        return rows;
+      },
+      /* Strike counts per user (server-computed — deleted videos keep
+       * their strike, so the panel cannot count them client-side). */
+      async adminStrikes() {
+        try {
+          const r = await callApi("admin-strikes", {});
+          return (r && r.data && r.data.counts) || {};
+        } catch (e) { return {}; }
+      },
+      async editVideo(videoId, caption) {
+        try {
+          await callApi("edit-video", { video_id: videoId, caption });
+        } catch (e) { throw asError(e); }
+      },
+      /* The signed-in user's own moderation state (for the Alerts
+       * notice: reason + strikes + chances left). */
+      async myModeration() {
+        try {
+          const r = await callApi("my-moderation", {});
+          return (r && r.data) || null;
+        } catch (e) { throw asError(e); }
       },
       async adminCategories() {
         return listMapped("categories", [Q.orderAsc("sort_order"), Q.limit(100)], mapRow);

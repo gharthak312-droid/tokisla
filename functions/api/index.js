@@ -1212,6 +1212,50 @@ async function actionSetCommentPin(ctx, body) {
   return { comment: updated };
 }
 
+// --- Strikes (Restricted) -------------------------------------------------
+// A strike is a "needs_review" moderation event. The video row is the
+// only place that links a video to its creator, and delete-video
+// removes it, so the event details carry creator_id: a strike survives
+// the video being deleted. A strike stops counting when the video is
+// restored (approved) — the admin's restore clears it. 3 strikes =
+// the account is suspended automatically.
+async function countStrikes(db, cfg, creatorId) {
+  const events = await listAll(db, cfg, COL.moderationEvents, [Query.equal("event_type", "needs_review"), Query.limit(100)]);
+  const videoCache = new Map();
+  let strikes = 0;
+  const out = [];
+  for (const e of events) {
+    let d = null;
+    try { d = JSON.parse(e.details || "{}"); } catch (_err) { d = null; }
+    if (!d || String(d.creator_id || "") !== String(creatorId)) continue;
+    if (!videoCache.has(e.video_id)) videoCache.set(e.video_id, await getRow(db, cfg, COL.videos, e.video_id));
+    const v = videoCache.get(e.video_id);
+    const status = v ? v.moderation_status : null;
+    const counts = !v || status === "needs_review" || status === "rejected";
+    if (counts) strikes++;
+    out.push({ video_id: e.video_id, decision: "needs_review", reason: d.reason || "", status, created_at: e.$createdAt || null });
+  }
+  return { strikes, events: out };
+}
+
+async function maybeAutoSuspend(ctx, creatorId, latestVideoId) {
+  // Best-effort: a failed check never rolls back the decision that
+  // was just written.
+  try {
+    const { strikes } = await countStrikes(ctx.db, ctx.cfg, creatorId);
+    if (strikes < 3) return { strikes, suspended: false };
+    const profile = await getRow(ctx.db, ctx.cfg, COL.profiles, creatorId);
+    if (!profile || profile.is_suspended === true) return { strikes, suspended: !!profile && profile.is_suspended === true };
+    await actionSuspendUser(ctx, { user_id: creatorId }, { suspend: true });
+    try {
+      await insertNotification(ctx.db, ctx.cfg, { userId: creatorId, type: "moderation", actorId: ctx.callerId, videoId: latestVideoId || null });
+    } catch (_e) { /* the suspension stands even if the notice fails */ }
+    return { strikes, suspended: true };
+  } catch (_e) {
+    return { strikes: -1, suspended: false };
+  }
+}
+
 async function actionModerateVideo(ctx, body) {
   // POST-moderation only (2026-11-03): new videos are published
   // live by create-upload and NEVER pass through this action as a
@@ -1251,7 +1295,7 @@ async function actionModerateVideo(ctx, body) {
   await createRow(db, ctx.cfg, COL.moderationEvents, ID.unique(), {
     video_id: videoId,
     event_type: decision,
-    details: JSON.stringify({ decision, reason: reason1000, reviewer_id: callerId }),
+    details: JSON.stringify({ decision, reason: reason1000, reviewer_id: callerId, creator_id: creatorId }),
   });
 
   // File flips after the row write (safe direction: a failed flip
@@ -1271,7 +1315,12 @@ async function actionModerateVideo(ctx, body) {
   } catch (e) {
     warnings.push(`notification: ${e && e.message ? e.message : "failed"}`);
   }
-  return { video: updated, warnings };
+  // 3 strikes (restricted videos) = the account is suspended
+  // automatically. Best-effort: a failed check never rolls back the
+  // decision that was just written.
+  let auto = { strikes: -1, suspended: false };
+  if (decision === "needs_review") auto = await maybeAutoSuspend(ctx, creatorId, videoId);
+  return { video: updated, warnings, strikes: auto.strikes, suspended: auto.suspended };
 }
 
 async function actionModerateStory(ctx, body) {
@@ -1491,10 +1540,77 @@ async function actionDeleteVideo(ctx, body) {
       if (!isNotFound(e)) warnings.push(`file ${fileId}: ${e && e.message ? e.message : "failed"}`);
     }
   }
-  void creatorId;
   await deleteRow(db, ctx.cfg, COL.videos, videoId);
   // Moderation review/event rows are audit history and are kept.
+  // When staff remove someone else's video, the creator gets a
+  // moderation notice and a "deleted" event (the app shows the reason
+  // and the strikes left). A direct staff delete carries no strike —
+  // restrict the video first when it should count as one.
+  if (isStaff && creatorId !== String(callerId)) {
+    try {
+      await insertNotification(db, ctx.cfg, { userId: creatorId, type: "moderation", actorId: callerId, videoId });
+    } catch (_e) { /* the delete stands even if the notice fails */ }
+    try {
+      await createRow(db, ctx.cfg, COL.moderationEvents, ID.unique(), {
+        video_id: videoId,
+        event_type: "deleted",
+        details: JSON.stringify({ decision: "deleted", reason: "Removed by admin", reviewer_id: callerId, creator_id: creatorId }),
+      });
+    } catch (_e) { /* audit row only */ }
+  }
   return { deleted: videoId, warnings };
+}
+
+async function actionEditVideo(ctx, body) {
+  const { db, callerId, isStaff } = ctx;
+  const videoId = requireString(body.videoId || body.video_id, "videoId");
+  const caption = String(body.caption ?? "").trim().slice(0, 300);
+  const video = await getRow(db, ctx.cfg, COL.videos, videoId);
+  if (!video) throw notFound("Video not found.");
+  if (!isStaff && String(video.creator_id) !== String(callerId)) {
+    throw forbidden("Only the owner or a moderator can edit this video.");
+  }
+  const updated = await updateRow(db, ctx.cfg, COL.videos, videoId, { caption });
+  return { video: updated };
+}
+
+async function actionMyModeration(ctx, body) {
+  const { db, callerId } = ctx;
+  const profile = await getRow(db, ctx.cfg, COL.profiles, callerId);
+  const { strikes, events } = await countStrikes(db, ctx.cfg, callerId);
+  // Direct admin deletions (event_type "deleted") so the app can
+  // explain a removal that never went through Restricted.
+  const deleted = await listAll(db, ctx.cfg, COL.moderationEvents, [Query.equal("event_type", "deleted"), Query.limit(100)]);
+  for (const e of deleted) {
+    let d = null;
+    try { d = JSON.parse(e.details || "{}"); } catch (_err) { d = null; }
+    if (d && String(d.creator_id || "") === String(callerId)) {
+      events.push({ video_id: e.video_id, decision: "deleted", reason: d.reason || "", status: null, created_at: e.$createdAt || null });
+    }
+  }
+  return {
+    strikes,
+    chancesLeft: Math.max(0, 3 - strikes),
+    suspended: profile ? profile.is_suspended === true : false,
+    events,
+  };
+}
+
+async function actionAdminStrikes(ctx, body) {
+  const { db } = ctx;
+  const events = await listAll(db, ctx.cfg, COL.moderationEvents, [Query.equal("event_type", "needs_review"), Query.limit(100)]);
+  const creators = new Set();
+  for (const e of events) {
+    let d = null;
+    try { d = JSON.parse(e.details || "{}"); } catch (_err) { d = null; }
+    if (d && d.creator_id) creators.add(String(d.creator_id));
+  }
+  const counts = {};
+  for (const creatorId of creators) {
+    const { strikes } = await countStrikes(db, ctx.cfg, creatorId);
+    if (strikes > 0) counts[creatorId] = strikes;
+  }
+  return { counts };
 }
 
 async function actionNotify(ctx, body) {
@@ -1534,7 +1650,26 @@ async function actionFileReport(ctx, body) {
     perm.readUser(callerId), perm.readTeam(),
     perm.updateTeam(), perm.deleteTeam(),
   ]);
-  return { report };
+  // A reported video is restricted at once: it leaves the feed and
+  // lands in the admin Restricted tab, where the admin deletes or
+  // restores it. Best-effort — the report is filed even if the
+  // restrict fails. Only a live (approved) video is restricted, and
+  // never by its own creator, so one video can only earn one strike
+  // from reports.
+  let restricted = false;
+  if (targetType === "video") {
+    try {
+      const video = await getRow(db, ctx.cfg, COL.videos, targetId);
+      if (video && video.moderation_status === "approved" && String(video.creator_id) !== String(callerId)) {
+        // Anonymous auto-restrict: the reporter must never appear as
+        // the actor on the creator's notice, so the call runs with a
+        // null caller (reviewer + actor stay empty).
+        await actionModerateVideo({ ...ctx, callerId: null }, { video_id: targetId, decision: "needs_review", reason });
+        restricted = true;
+      }
+    } catch (_e) { restricted = false; }
+  }
+  return { report, restricted };
 }
 
 async function actionSendMessage(ctx, body) {
@@ -1749,6 +1884,9 @@ const HANDLERS = {
   unsuspend: { fn: (ctx, body) => actionSuspendUser(ctx, body, { suspend: false }), auth: "admin" },
   "set-role": { fn: actionSetRole, auth: "admin" },
   "delete-video": { fn: actionDeleteVideo, auth: "signed-in" },
+  "edit-video": { fn: actionEditVideo, auth: "signed-in" },
+  "my-moderation": { fn: actionMyModeration, auth: "signed-in" },
+  "admin-strikes": { fn: actionAdminStrikes, auth: "staff" },
   "repair-video-files": { fn: actionRepairVideoFiles, auth: "signed-in" },
   notify: { fn: actionNotify, auth: "signed-in" },
   "file-report": { fn: actionFileReport, auth: "signed-in" },
@@ -1800,10 +1938,10 @@ export default async ({ req, res, log, error: logError }) => {
     } else if (handler.auth === "admin") {
       await requireTeam(teams, callerId, { adminOnly: true });
       isStaff = true;
-    } else if (handler.auth === "signed-in" && (action === "delete-video" || action === "repair-video-files")) {
-      // delete-video allows owners as well as staff; resolve staff
-      // status without failing so the handler can apply the
-      // owner-or-staff rule itself.
+    } else if (handler.auth === "signed-in" && (action === "delete-video" || action === "edit-video" || action === "repair-video-files")) {
+      // delete-video / edit-video allow owners as well as staff;
+      // resolve staff status without failing so the handler can apply
+      // the owner-or-staff rule itself.
       try {
         await requireTeam(teams, callerId, { adminOnly: false });
         isStaff = true;
