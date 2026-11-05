@@ -937,6 +937,9 @@ async function actionDeleteAccount(ctx, body) {
     await deleteRowsByQuery(db, ctx.cfg, COL.savedVideos, "video_id", videoId);
     await deleteRowsByQuery(db, ctx.cfg, COL.pollVotes, "video_id", videoId);
     await deleteRowsByQuery(db, ctx.cfg, COL.watchHistory, "video_id", videoId);
+    // Original sounds point at this video's file: without this, deleting
+    // a video leaves an orphan sound whose preview always fails.
+    await deleteRowsByQuery(db, ctx.cfg, COL.sounds, "video_id", videoId);
     await deleteRow(db, ctx.cfg, COL.videos, videoId);
   }
   // 2b. Per-story children, then the story documents.
@@ -1475,6 +1478,9 @@ async function actionDeleteVideo(ctx, body) {
   // cascade exists to prevent; deleting them is harmless (the client
   // drops missing videos from history joins anyway).
   await deleteRowsByQuery(db, ctx.cfg, COL.watchHistory, "video_id", videoId);
+  // Original sounds point at this video's file: without this, deleting
+  // a video leaves an orphan sound whose preview always fails.
+  await deleteRowsByQuery(db, ctx.cfg, COL.sounds, "video_id", videoId);
 
   const warnings = [];
   for (const fileId of [video.storage_path, video.thumbnail_path]) {

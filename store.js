@@ -2219,6 +2219,21 @@
             mapped.forEach((s) => { if (s.creator_id && !s.creator_username && byId[s.creator_id]) s.creator_username = byId[s.creator_id].username || null; });
           }
         } catch (e) { /* names are display-only */ }
+        /* Drop original sounds whose video was deleted: delete-video
+         * never removed them, so their file is gone and preview always
+         * fails with "Could not preview this sound." A failed check
+         * keeps the rows (better a dead preview than a missing sound). */
+        try {
+          const withVideo = mapped.filter((s) => s.video_id);
+          if (withVideo.length) {
+            const ids = [...new Set(withVideo.map((s) => String(s.video_id)))];
+            const alive = await listIn("videos", "$id", ids, [], mapRow);
+            const aliveSet = new Set((alive || []).map((v) => String(v.id)));
+            for (let i = mapped.length - 1; i >= 0; i--) {
+              if (mapped[i].video_id && !aliveSet.has(String(mapped[i].video_id))) mapped.splice(i, 1);
+            }
+          }
+        } catch (e) { /* keep the rows if the check fails */ }
         /* Catalog-file entries merge in front of collection rows and
          * resolve a media-bucket file id to a streaming view URL, the
          * same as collection rows; sounds are streamed for playback

@@ -493,6 +493,7 @@ body{background:#07070C}
  * Normal/Warm/Cool/Mono/Vivid labels were invisible on the camera and
  * edit screens. Dark chip surface + light text, like .ac-chip/.chip. */
 [data-theme="dark"] .fchip{background:#15151E;border-color:#282833;color:#F1F0F6}
+[data-theme="dark"] .sound-tab:not(.active){background:#15151E;border-color:#282833;color:#F1F0F6}
 .ctx-banner{display:flex;align-items:center;gap:8px;background:var(--emerald-soft);border:1px solid var(--line);border-radius:12px;padding:9px 12px;font-size:13.5px;margin-bottom:12px}
 .ctx-banner span{flex:1}
 .ctx-clear{background:none;border:none;cursor:pointer;color:inherit;display:flex;padding:2px}
